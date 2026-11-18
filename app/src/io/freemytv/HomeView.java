@@ -4546,7 +4546,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private final Spring[] npOpen = {new Spring(0.28f, 0.74f, 0)};
     private boolean npOpened;
     private long npHeroAt;
-    private static final float NPC_W = 1074, NPC_H = 384, NPC_TOP = 272, NPC_PAD = 40;
+    private static final float NPC_W = 1074, NPC_H = 404, NPC_TOP = 266, NPC_PAD = 40;
     /** The cover as the card's picture, and its colour on the progress (made once per song). */
     private final android.graphics.Matrix npcGlowMatrix = new android.graphics.Matrix();
     private int npcGlowVersion = -1, npcAccent = 0xFFFFFFFF;
@@ -4625,7 +4625,26 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             for (Paint p : new Paint[] {npcLabel, npcTitle, npcArtist, npcTime}) p.setShadowLayer(10 * k, 0, 2 * k, 0x59000000);
             npcVersion = -1;
         }
-        float tx = L + pad + 8 * k, tw = npCard.width() * 0.62f;
+        // The cover, square, top left, lifted off the card by its own shadow; the text beside it.
+        float cs = 150 * k, cl = L + pad + 8 * k, ct = T + 38 * k;
+        cell.set(cl, ct, cl + cs, ct + cs);
+        tmp.set(cell);
+        tmp.offset(0, 10 * k);
+        shadow.setColor(Ui.alpha(0xFF000000, 0.5f * te));
+        shadows.draw(c, tmp, 18 * k, SHADOW_BLUR * k, shadow);
+        if (np.art != null) {
+            int alpha = Math.round(255 * te);
+            bitmapPaint.setAlpha(alpha);
+            imageFill.setAlpha(alpha);
+            roundImage(c, np.art, cell, 18 * k);
+            bitmapPaint.setAlpha(255);
+            imageFill.setAlpha(255);
+        } else {
+            fill.setShader(null);
+            fill.setColor(Ui.alpha(0x24FFFFFF, te));
+            c.drawRoundRect(cell, 18 * k, 18 * k, fill);
+        }
+        float tx = cell.right + 32 * k, tw = npCard.right - pad - tx;
         if (np.version != npcVersion) {
             npcVersion = np.version;
             npcTitleText = TextUtils.ellipsize(np.title, npcTitle, tw, TextUtils.TruncateAt.END);
@@ -4635,15 +4654,15 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
         // Where it plays (the app and this TV), then the title and the artist, top left.
         npcLabel.setColor(Ui.alpha(0xD9FFFFFF, te));
-        c.drawText(npcLabelText, tx, T + 62 * k, npcLabel);
+        c.drawText(npcLabelText, tx, T + 72 * k, npcLabel);
         npcTitle.setColor(Ui.alpha(0xFFFFFFFF, te));
-        c.drawText(npcTitleText, 0, npcTitleText.length(), tx, T + 128 * k, npcTitle);
+        c.drawText(npcTitleText, 0, npcTitleText.length(), tx, T + 134 * k, npcTitle);
         npcArtist.setColor(Ui.alpha(0xCCFFFFFF, te));
-        c.drawText(npcArtistText, 0, npcArtistText.length(), tx, T + 174 * k, npcArtist);
+        c.drawText(npcArtistText, 0, npcArtistText.length(), tx, T + 178 * k, npcArtist);
         // The progress: a thick track, what played in the song's colour with a soft hill of sound rolling over it
         // while it plays, and a white knob at the playhead; the time played and the length under its ends.
-        float p = Ui.clamp(np.progress()), by = T + 232 * k, bh = 16 * k;
-        float a0 = tx, a1 = npCard.right - pad - 8 * k, head = a0 + (a1 - a0) * p;
+        float p = Ui.clamp(np.progress()), by = T + 246 * k, bh = 16 * k;
+        float a0 = cl, a1 = npCard.right - pad - 8 * k, head = a0 + (a1 - a0) * p;
         fill.setShader(null);
         fill.setColor(Ui.alpha(0x47FFFFFF, te));
         tmp.set(a0, by - bh / 2, a1, by + bh / 2);
@@ -4682,7 +4701,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         // The controls, centred under it: white symbols with no circles; the focused one on a white disc.
         updateCtrlKinds(np);
         int n = ctrlKinds.length;
-        float step = 118 * k, cy = T + 322 * k, x0 = npCard.centerX() - (n - 1) * step / 2;
+        float step = 118 * k, cy = T + 344 * k, x0 = npCard.centerX() - (n - 1) * step / 2;
         for (int i = 0; i < n; i++) {
             int kind = ctrlKinds[i];
             float f = Ui.clamp(ctrlFocus[i].value), cx = x0 + i * step;
