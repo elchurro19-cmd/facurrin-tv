@@ -4297,9 +4297,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     // and resting on one turns the background into what you last saw or heard there). Up to three cards (the latest
     // three to resume) and a row of actions: open the app, move it, its info.
     private static final float WATCH_PAD = 22, WATCH_HEADER = 36, WATCH_TOP = 50;
-    private static final float WATCH_COL = 200, WATCH_COL_GAP = 16, WATCH_THUMB_H = 104;
+    private static final float WATCH_COL = 200, WATCH_COL_GAP = 16, WATCH_THUMB_H = 92;
     /** Below the cards: their text, then the actions row; the arrow under the bubble points at the app. */
-    private static final float WATCH_BELOW = 130, WATCH_ARROW = 16;
+    private static final float WATCH_BELOW = 124, WATCH_ARROW = 16;
     private final RectF[] actRects = {new RectF(), new RectF(), new RectF()};
     private final String[] actText = new String[3];
     private final Spring[] actFocus = {new Spring(0.32f, 0.8f, 0), new Spring(0.32f, 0.8f, 0), new Spring(0.32f, 0.8f, 0)};
@@ -4308,6 +4308,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private float watchArrowX;
     private TextPaint actPaint;
     private final Spring[] bubbleShow = {new Spring(0.3f, 0.8f, 0)};
+    /** The bubble's own tint over the glass: dark and even, so the cards read the same on any picture. */
+    private static final int BUBBLE_FILL = 0xB8202024;
 
     // The hint over the focused app ("↑ Más de Spotify") and, after a second's rest on it, the background turning into
     // the latest thing seen or heard there, with its title under the clock (where the weather was).
@@ -4648,7 +4650,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         actText[0] = "Abrir " + shelfLabel(c.pkg);
         actText[1] = "Mover";
         actText[2] = "Información";
-        float ax = watchCard.left + pad, ay = watchCard.top + (WATCH_TOP + WATCH_THUMB_H + 70) * k, ah = 42 * k;
+        float ax = watchCard.left + pad, ay = watchCard.top + (WATCH_TOP + WATCH_THUMB_H + 66) * k, ah = 42 * k;
         for (int i = 0; i < 3; i++) {
             float aw = actPaint.measureText(actText[i]) + 44 * k;
             actRects[i].set(ax, ay, ax + aw, ay + ah);
@@ -4662,28 +4664,34 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         if (wc == null) return;
         float eased = 1, a = 1;   // the layer's alpha fades it (placeWatch)
         c.save();
-        // The bubble: glass with a wash of the app's colour, and an arrow under it pointing at the app.
+        // The bubble: one even pane of dark glass (the picture behind only faintly), its lit rim, and a small arrow of
+        // the same glass pointing at the app. The app's colour is only a dot beside the heading.
+        float brad = 28 * k;
         tmp.set(watchCard);
         tmp.offset(0, 18 * k);
-        shadow.setColor(Ui.alpha(0xFF000000, 0.4f));
-        shadows.draw(c, tmp, 30 * k, SHADOW_BLUR * 1.6f * k, shadow);
-        drawerGlass(c, watchCard, 30 * k, 0.72f, 0x1A000000, 8 * k, 1);
-        if (watchColor != 0xFFFFFFFF) {
-            fill.setShader(null);
-            fill.setColor(Ui.alpha(watchColor, 0.16f));
-            c.drawRoundRect(watchCard, 30 * k, 30 * k, fill);
-        }
+        shadow.setColor(Ui.alpha(0xFF000000, 0.45f));
+        shadows.draw(c, tmp, brad, SHADOW_BLUR * 1.6f * k, shadow);
         glyphPath.reset();
-        float ab = watchCard.bottom - 1 * k, aw = 16 * k;
+        float ab = watchCard.bottom - 2 * k, aw = 15 * k;
         glyphPath.moveTo(watchArrowX - aw, ab);
         glyphPath.lineTo(watchArrowX, ab + WATCH_ARROW * k);
         glyphPath.lineTo(watchArrowX + aw, ab);
         glyphPath.close();
         fill.setShader(null);
-        fill.setColor(0xB02A2A30);
+        fill.setColor(BUBBLE_FILL);
         c.drawPath(glyphPath, fill);
+        drawerGlass(c, watchCard, brad, 0.72f, 0x1A000000, 8 * k, 1);
+        fill.setColor(BUBBLE_FILL);
+        c.drawRoundRect(watchCard, brad, brad, fill);
+        scene.glass(c, watchCard, brad, 0xFFFFFFFF, 0, 0, 0, 0.02f, 0, 1);   // the rim again, over the fill
+        float hx = watchHeadX;
+        if (watchColor != 0xFFFFFFFF) {
+            fill.setColor(watchColor);
+            c.drawCircle(hx + 5 * k, watchCard.top + WATCH_HEADER * k - Ui.halfCap(watchHead), 5 * k, fill);
+            hx += 20 * k;
+        }
         watchHead.setColor(Ui.alpha(tone(L_DIM, 0xB3FFFFFF), a));
-        c.drawText(wc.header, watchHeadX, watchCard.top + WATCH_HEADER * k, watchHead);
+        c.drawText(wc.header, hx, watchCard.top + WATCH_HEADER * k, watchHead);
         int ink = tone(L_INK, 0xFFFFFFFF), dim = tone(L_DIM, 0xADFFFFFF);
         boolean round = wc.variant == WatchNext.ROW_ROUND;
         for (int i = 0; i < Math.min(3, wc.items.size()); i++) {
