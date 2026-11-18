@@ -92,7 +92,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     // The tab bar is a 68 px capsule; the cards sit on the 5-column grid (the wide one spans 3).
     private static final float L_TITLE_BASE = 130, L_TABBAR_TOP = 158, L_TABBAR_H = 68, L_CARDS_TOP = 262, L_CARD_H = 442;
     private static final float L_TALL_W = 320, L_CARD_GAP = 40, L_BUTTON = 68, L_BUTTON_GAP = 20, L_BUTTON_CY = 103;
-    private static final float L_PLATTER_TOP = 850, L_TILE_H = 84;   // smaller shelf tiles (was 814, 126); same bottom margin
+    // Glass edition: CleanYourTV Glass's dock size (tiles up to 279 × 157 with five apps; more apps, smaller tiles),
+    // keeping the same bottom edge (was 850, 84).
+    private static final float L_PLATTER_TOP = 777, L_TILE_H = 157;
     private static final float L_DATE_BASE = 330, L_CLOCK_BASE = 540, L_WEATHER_BASE = 626, L_QUOTES_BASE = 694;
     private static final float RECENT_W = 196, RECENT_GAP = 24, RECENT_TOP = 368;   // compact (was 268)
     private static final int L_INK = 0xFF1D1D1F, L_DIM = 0xFF6E6E73, L_FAINT = 0xFF8E8E93;
@@ -2046,7 +2048,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         float f = tileFocus[i].value, fc = Ui.clamp(f), s = (1 + FOCUS_GROW * f + LIFT_GROW * l);
         RectF base = tileRects[i];
         float bw = base.width(), bh = base.height(), r0 = TILE_RADIUS * k;
-        float cx = base.centerX(), cy = base.centerY();
+        // Glass edition: the focused tile also rises a little out of the dock (the spring gives it the bounce).
+        float cx = base.centerX(), cy = base.centerY() - FOCUS_RISE * k * f;
         cell.set(cx - bw * s / 2, cy - bh * s / 2, cx + bw * s / 2, cy + bh * s / 2);
         float r = r0 * s;
         // Shadow at the resting icon size, enlarged by the transform (so the blur stays cached): short at rest, deep
@@ -2096,7 +2099,19 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             // (resting, focused) swapped resolution visibly as the focus arrived.
             roundImage(c, cardImage(it, bw * (1 + FOCUS_GROW), bh * (1 + FOCUS_GROW)), cell, r);
         }
+        // Glass edition: tvOS's white focus rim around the focused tile.
+        if (fc > 0.01f && l <= 0.02f) {
+            focusRing.setStrokeWidth(3.5f * k);
+            focusRing.setColor(Ui.alpha(0xFFFFFFFF, 0.95f * fc));
+            float o = 1.5f * k;
+            tmp.set(cell.left - o, cell.top - o, cell.right + o, cell.bottom + o);
+            c.drawRoundRect(tmp, r + o, r + o, focusRing);
+        }
     }
+
+    private static final float FOCUS_RISE = 12;
+    private final Paint focusRing = new Paint(Paint.ANTI_ALIAS_FLAG);
+    { focusRing.setStyle(Paint.Style.STROKE); }
 
     private final android.util.LruCache<String, Bitmap> crispTiles = new android.util.LruCache<>(32);
 

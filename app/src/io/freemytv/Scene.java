@@ -253,11 +253,7 @@ final class Scene {
     void glass(Canvas c, RectF r, float radius, int tint, float tintAlpha, int glow, float glowAlpha, float lift, float body, float alpha) {
         if (alpha <= 0.004f) return;
         if (glass == null) {
-            if (body > 0) {
-                flatFill.setColor(Ui.alpha(tint | 0xFF000000, Math.max(0.35f, tintAlpha)));
-                c.drawRoundRect(r, radius, radius, flatFill);
-            }
-            c.drawRoundRect(r, radius, radius, flatRim);
+            frost(c, r, radius, body, alpha);
             return;
         }
         float hw = r.width() / 2, hh = r.height() / 2, inner = Math.min(hw, hh);
@@ -274,5 +270,32 @@ final class Scene {
         glassPaint.setAlpha(Math.round(255 * Math.min(1, alpha)));
         c.drawRect(r.left - 1, r.top - 1, r.right + 1, r.bottom + 1, glassPaint);
         glassPaint.setAlpha(255);
+    }
+
+    // Glass edition (from CleanYourTV Glass's FrostDrawable): with no shader to blur behind it (Android 12 and older),
+    // smoky glass that darkens a little towards the bottom, and a rim lit from the top left: brightest on the edges
+    // that face the light, fainter on the far side.
+    private static final int FROST_TOP = 0x75505058, FROST_BOTTOM = 0x8C34343C;
+    private final android.graphics.RectF frostRim = new android.graphics.RectF();
+
+    private void frost(Canvas c, RectF r, float radius, float body, float alpha) {
+        int a = Math.round(255 * Math.min(1, alpha));
+        if (body > 0) {
+            flatFill.setShader(new android.graphics.LinearGradient(0, r.top, 0, r.bottom, FROST_TOP, FROST_BOTTOM,
+                    Shader.TileMode.CLAMP));
+            flatFill.setAlpha(Math.round(a * Math.min(1, body)));
+            c.drawRoundRect(r, radius, radius, flatFill);
+            flatFill.setShader(null);
+        }
+        float sw = Math.max(1.5f, Math.min(r.width(), r.height()) * 0.012f);
+        flatRim.setStrokeWidth(sw);
+        flatRim.setShader(new android.graphics.LinearGradient(r.left, r.top, r.right, r.bottom,
+                new int[] {0x99FFFFFF, 0x24FFFFFF, 0x47FFFFFF}, new float[] {0, 0.62f, 1}, Shader.TileMode.CLAMP));
+        flatRim.setAlpha(a);
+        frostRim.set(r.left + sw / 2, r.top + sw / 2, r.right - sw / 2, r.bottom - sw / 2);
+        float rr = Math.max(0, radius - sw / 2);
+        c.drawRoundRect(frostRim, rr, rr, flatRim);
+        flatRim.setShader(null);
+        flatRim.setAlpha(255);
     }
 }
