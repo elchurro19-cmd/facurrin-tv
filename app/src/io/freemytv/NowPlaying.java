@@ -42,7 +42,7 @@ final class NowPlaying implements MediaSessionManager.OnActiveSessionsChangedLis
     private MediaController controller;
 
     String title = "", artist = "", pkg = "";
-    Bitmap art;
+    Bitmap art, artLarge;
     long duration, position, positionAt;   // positionAt: SystemClock.elapsedRealtime() of `position`
     float speed;
     boolean playing;
@@ -257,6 +257,8 @@ final class NowPlaying implements MediaSessionManager.OnActiveSessionsChangedLis
             title = t;
             artist = a;
             art = b == null ? null : square(b, 160);
+            // Glass edition: the open player shows the cover big, so it keeps a sharper copy too (up to 512 px).
+            artLarge = b == null ? null : square(b, Math.min(512, Math.min(b.getWidth(), b.getHeight())));
         }
         if (!playing && !dismissed && !title.isEmpty()) dismissed = stopped().equals(pkg + "\n" + title);
         version++;

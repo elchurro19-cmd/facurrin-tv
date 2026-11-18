@@ -4546,12 +4546,13 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private final Spring[] npOpen = {new Spring(0.28f, 0.74f, 0)};
     private boolean npOpened;
     private long npHeroAt;
-    private static final float NPC_W = 1074, NPC_H = 404, NPC_TOP = 266, NPC_PAD = 40;
+    private static final float NPC_W = 860, NPC_H = 404, NPC_PAD = 40;
     /** The cover as the card's picture, and its colour on the progress (made once per song). */
     private final android.graphics.Matrix npcGlowMatrix = new android.graphics.Matrix();
     private int npcGlowVersion = -1, npcAccent = 0xFFFFFFFF;
+    private float npcArtAt = Float.NaN;
     private final Paint npcArtPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-    private android.graphics.LinearGradient npcScrim;
+    private android.graphics.LinearGradient npcScrim, npcFoot;
     private final RectF npCard = new RectF(), npMorph = new RectF();
     private TextPaint npcLabel, npcTitle, npcArtist, npcTime;
     private int npcVersion = -1;
@@ -4562,9 +4563,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         float e = npOpen[0].value;
         NowPlaying np = nowPlaying;
         if (e <= 0.01f || np == null || !np.visible()) return;
-        float right = CONTENT_R * k;
-        npCard.set(right - NPC_W * k, NPC_TOP * k, right, (NPC_TOP + NPC_H) * k);
-        // It grows out of the capsule: from its place and size to the player's (the spring overshoots a little).
+        // It drops down out of the capsule: the card hangs from the capsule's top right corner (the capsule's own
+        // controls move inside it), and grows from the capsule's place and size (the spring overshoots a little).
+        RectF cap = topRects[3];
+        float right = cap.left - 22 * k, top = cap.top;
+        npCard.set(right - NPC_W * k, top, right, top + NPC_H * k);
         RectF from = npRect.isEmpty() ? npCard : npRect;
         npMorph.set(lerp(from.left, npCard.left, e), lerp(from.top, npCard.top, e), lerp(from.right, npCard.right, e),
                 lerp(from.bottom, npCard.bottom, e));
@@ -4582,32 +4585,52 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         shadows.draw(c, tmp, rad, SHADOW_BLUR * 0.8f * k, shadow);
         drawerGlass(c, npMorph, rad, 0.72f, 0x1A000000, 10 * k, ge);
         float pad = NPC_PAD * k, L = npCard.left, T = npCard.top;
-        // Android 14's media card: the cover fills the card (centre-cropped), darkened from the left so the text reads,
-        // and the song's own colour tints the progress. Made once per song.
-        if (np.version != npcGlowVersion) {
+        // The glass on the left, the cover big on the right fading into it (option D); the song's own colour tints the
+        // progress. The cover's shader is made once per song, at the card's resting place (it drops from the top right,
+        // so the picture shows itself as the card grows).
+        if (np.version != npcGlowVersion || npcArtAt != npCard.left + npCard.top) {
             npcGlowVersion = np.version;
+            npcArtAt = npCard.left + npCard.top;
             npcAccent = blend(coverColor(np.art), 0xFFFFFFFF, 0.35f);
-            npcArtPaint.setShader(np.art == null ? null
-                    : new BitmapShader(np.art, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
+            npcArtPaint.setShader(null);
+            Bitmap big = np.artLarge != null ? np.artLarge : np.art;
+            if (big != null && big.getWidth() > 0 && big.getHeight() > 0) {
+                float aw = npCard.width() * 0.6f, al = npCard.right - aw;
+                float s = Math.max(aw / big.getWidth(), npCard.height() / big.getHeight());
+                android.graphics.Matrix m = new android.graphics.Matrix();
+                m.setScale(s, s);
+                m.postTranslate(al + aw / 2 - big.getWidth() * s / 2, npCard.centerY() - big.getHeight() * s / 2);
+                BitmapShader art = new BitmapShader(big, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+                art.setLocalMatrix(m);
+                android.graphics.LinearGradient fade = new android.graphics.LinearGradient(al, 0, al + aw * 0.62f, 0,
+                        0x00000000, 0xFF000000, Shader.TileMode.CLAMP);
+                npcArtPaint.setShader(new android.graphics.ComposeShader(art, fade, android.graphics.PorterDuff.Mode.DST_IN));
+            }
         }
         float ae = Ui.clamp(e * 1.6f - 0.3f);
-        if (np.art != null && npcArtPaint.getShader() != null && ae > 0.01f) {
-            float s = Math.max(npMorph.width() / np.art.getWidth(), npMorph.height() / np.art.getHeight());
-            npcGlowMatrix.setScale(s, s);
-            npcGlowMatrix.postTranslate(npMorph.centerX() - np.art.getWidth() * s / 2,
-                    npMorph.centerY() - np.art.getHeight() * s / 2);
-            npcArtPaint.getShader().setLocalMatrix(npcGlowMatrix);
+        if (npcArtPaint.getShader() != null && ae > 0.01f) {
             npcArtPaint.setAlpha(Math.round(255 * ae));
             c.drawRoundRect(npMorph, rad, rad, npcArtPaint);
+            // A light shade from the left so the white text reads over the glass and the picture's edge.
             if (npcScrim == null) {
-                npcScrim = new android.graphics.LinearGradient(0, 0, 1, 0, new int[] {0xE0101012, 0xA6101012, 0x4D101012},
-                        new float[] {0, 0.5f, 1}, Shader.TileMode.CLAMP);
+                npcScrim = new android.graphics.LinearGradient(0, 0, 1, 0, new int[] {0x8C101012, 0x52101012, 0x14101012},
+                        new float[] {0, 0.45f, 1}, Shader.TileMode.CLAMP);
             }
             npcGlowMatrix.setScale(npMorph.width(), 1);
             npcGlowMatrix.postTranslate(npMorph.left, 0);
             npcScrim.setLocalMatrix(npcGlowMatrix);
             fill.setShader(npcScrim);
             fill.setAlpha(Math.round(255 * ae));
+            c.drawRoundRect(npMorph, rad, rad, fill);
+            // And from the foot, so the controls read over the picture's own text.
+            if (npcFoot == null) {
+                npcFoot = new android.graphics.LinearGradient(0, 0, 0, 1, new int[] {0x00101012, 0x00101012, 0xB8101012, 0xF2101012},
+                        new float[] {0, 0.3f, 0.72f, 1}, Shader.TileMode.CLAMP);
+            }
+            npcGlowMatrix.setScale(1, npMorph.height());
+            npcGlowMatrix.postTranslate(0, npMorph.top);
+            npcFoot.setLocalMatrix(npcGlowMatrix);
+            fill.setShader(npcFoot);
             c.drawRoundRect(npMorph, rad, rad, fill);
             fill.setShader(null);
             fill.setAlpha(255);
