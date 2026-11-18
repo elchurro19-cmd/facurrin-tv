@@ -182,7 +182,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private int widgetIndex;    // with TalkBack on, the drawer's weather (0) or football (1) card can take the focus
     private List<Recs.Pick> cards = new ArrayList<>();
     /** Glass edition: five round buttons (Buscar, Hablar, Apagar en, Wi-Fi, Ajustes) after the three tabs. */
-    private static final int TOP_N = 5, TOP_LAST = 2 + TOP_N;
+    private static final int TOP_N = 4, TOP_LAST = 2 + TOP_N;
+    /** The search button grows down into a pill with the microphone under it (focus on it: 1); micFocus: on the mic. */
+    private final Spring[] searchPill = {new Spring(0.3f, 0.8f, 0)}, micFocus = {new Spring(0.3f, 0.85f, 0)};
+    private boolean inMic;
     private final Spring[] topFocus = new Spring[3 + TOP_N];
     private final RectF[] topRects = new RectF[3 + TOP_N];
     private final Spring[] cardFocus = new Spring[3];
@@ -1086,7 +1089,6 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         // Glass edition: TV en vivo and the inputs stay in the drawer only; search and voice (the Google Assistant),
         // the sleep timer and the Wi-Fi took their place.
         lightButtons.add(HomeApps.action(HomeApps.QUICK_SETTINGS, "search", "Buscar", "search"));
-        lightButtons.add(HomeApps.action(HomeApps.QUICK_SETTINGS, "voice", "Hablar", "mic"));
         lightButtons.add(HomeApps.action(HomeApps.QUICK_SETTINGS, "sleep", "Apagar en\u2026", "bedtime"));
         lightButtons.add(HomeApps.action(HomeApps.QUICK_SETTINGS, "wifi", "Wi-Fi", "wifi"));
         lightButtons.add(HomeApps.action(HomeApps.QUICK_SETTINGS, "settings", Ui.tr("light|Settings"), "settings"));
@@ -1274,7 +1276,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         if (reorderAnim) tilesMoving |= stepReorder(dt, up);
         boolean statusMoving = step(statusFocus, dt);
         boolean heroMoving = heroFocus.step(dt);
-        boolean topMoving = step(topFocus, dt) | step(playerFocus, dt) | step(avatarFocus, dt) | step(npExpand, dt) | step(ctrlFocus, dt) | step(ctrlShow, dt) | step(npOpen, dt) | step(npFull, dt) | step(barFocus, dt), cardsMoving = step(cardFocus, dt) | step(recentFocus, dt);
+        boolean topMoving = step(topFocus, dt) | step(playerFocus, dt) | step(avatarFocus, dt) | step(npExpand, dt) | step(ctrlFocus, dt) | step(ctrlShow, dt) | step(npOpen, dt) | step(npFull, dt) | step(barFocus, dt) | step(searchPill, dt) | step(micFocus, dt), cardsMoving = step(cardFocus, dt) | step(recentFocus, dt);
         if (topMoving) placeWatch();   // the island fades out while the player opens in its place
         boolean watchMoving = step(watchFocus, dt) | step(actFocus, dt);
         boolean shelfUpMoving = step(bubbleShow, dt);
@@ -2747,6 +2749,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             npFull[0].target = full ? 1 : 0;
             statusChanged = heroChanged = true;
         }
+        boolean onSearch = !sheetOpen && zone == Z_TOP && topIndex == 3;
+        if (!onSearch) inMic = false;
+        statusChanged |= aim(searchPill, onSearch ? 0 : -1, snap);
+        statusChanged |= aim(micFocus, onSearch && inMic ? 0 : -1, snap);
         statusChanged |= topChanged;
         tilesDirty |= snap || tilesChanged;
         statusDirty |= snap || statusChanged;
@@ -3348,7 +3354,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             }
             it = lightButtons.get(topIndex - 3);
             r = topRects[topIndex];
-            if (topButton(it.key)) return;
+            if (topButton(topIndex == 3 && inMic ? "voice" : it.key)) return;
         } else if (zone == Z_AVATAR) {
             click.open();
             try {
@@ -5440,6 +5446,51 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
     }
 
+    /**
+     * The magnifier, which grows down into a vertical pill of glass with the microphone under it while it has the
+     * focus (one button for typing and for talking to the Assistant). False: not grown at all, drawn as the others.
+     */
+    private final RectF pillRect = new RectF();
+
+    private boolean drawSearchPill(Canvas c, RectF r) {
+        float e = Ui.clamp(searchPill[0].value), m = Ui.clamp(micFocus[0].value);
+        if (e <= 0.01f) return false;
+        float f = Ui.clamp(topFocus[3].value), s = 1 + 0.08f * e, rad = r.width() / 2 * s;
+        float ext = (L_BUTTON + L_BUTTON_GAP) * k * e;
+        float cx = r.centerX(), top = r.centerY() - rad, bottom = r.centerY() + rad + ext;
+        tmp.set(cx - rad, top, cx + rad, bottom);
+        RectF pill = pillRect;
+        pill.set(tmp);
+        tmp.offset(0, 10 * k);
+        shadow.setColor(Ui.alpha(0xFF000000, tone(0.16f, 0.36f)));
+        shadows.draw(c, tmp, rad, SHADOW_BLUR * k, shadow);
+        scene.liquid(c, pill, rad, tone(0xFFFFFFFF, SMOKE), tone(0.55f, 0.5f), tone(0.02f, 0.01f), 12 * k, 8 * k,
+                tone(0.6f, 0.45f), 1);
+        float cy1 = r.centerY(), cy2 = r.centerY() + ext, in = 5 * k;
+        // The white focus sits on the magnifier or, one step down, on the microphone.
+        float onSearch = f * (1 - m);
+        fill.setShader(null);
+        if (onSearch > 0.01f) {
+            fill.setColor(Ui.alpha(0xFFFFFFFF, onSearch));
+            c.drawCircle(cx, cy1, rad - in, fill);
+        }
+        if (m > 0.01f) {
+            fill.setColor(Ui.alpha(0xFFFFFFFF, m));
+            c.drawCircle(cx, cy2, rad - in, fill);
+        }
+        int light = tone(L_INK, 0xEBFFFFFF);
+        Symbols.draw(getContext(), c, "search", cx, cy1, 27 * k * s, blend(light, L_INK, onSearch));
+        Symbols.draw(getContext(), c, "mic", cx, cy2, 27 * k * s, Ui.alpha(blend(light, L_INK, m), Math.min(1, e * 1.5f)));
+        // Its name on the left of the focused circle (under it is the edge of the buttons' layer).
+        String label = m > 0.5f ? "Hablar con el Asistente" : "Buscar  ·  ↓ para hablar";
+        lTip.setAlpha(Math.round(255 * f));
+        Paint.Align was = lTip.getTextAlign();
+        lTip.setTextAlign(Paint.Align.RIGHT);
+        c.drawText(label, cx - rad - 18 * k, cy2 + Ui.halfCap(lTip), lTip);   // under the music capsule, not on it
+        lTip.setTextAlign(was);
+        return true;
+    }
+
     private boolean wifiOn = true;
     private int sleepLeft;
     private TextPaint badge;
@@ -5543,6 +5594,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 c.drawCircle(cell.centerX(), cell.centerY(), rad, fill);
             }
             HomeApps.Item b = lightButtons.get(i);
+            if (b.key.equals("search") && drawSearchPill(c, r)) continue;
             String symbol = b.key.equals("wifi") ? (wifiOn ? "wifi" : "wifi_off") : b.symbol;
             int ink = blend(tone(L_INK, 0xEBFFFFFF), L_INK, f);
             if (b.key.equals("wifi") && !wifiOn) ink = blend(0xFFFF6961, L_INK, f);   // no connection: red
@@ -5709,6 +5761,16 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 }
                 break;
             case Z_TOP:
+                // The search pill: down to the microphone under the magnifier, up back to it.
+                if (topIndex == 3 && dy > 0 && !inMic) {
+                    inMic = true;
+                    break;
+                }
+                if (topIndex == 3 && dy < 0 && inMic) {
+                    inMic = false;
+                    break;
+                }
+                if (dx != 0) inMic = false;
                 if (dx > 0 && topIndex == TOP_LAST) {
                     if (!SHOW_AVATAR) return true;
                     zone = Z_AVATAR;
