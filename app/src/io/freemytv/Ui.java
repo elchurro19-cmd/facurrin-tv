@@ -45,6 +45,8 @@ final class Ui {
     /** Bumped when the language changes: text cached by the screens is made again. */
     static volatile int generation;
     static Typeface thin, light, displayMedium, displaySemibold, regular, medium, semibold;
+    /** Glass edition: Anton (SIL OFL), the tall condensed "stadium" face of the clock and the temperature. */
+    static Typeface stadium;
     private static boolean loaded;
     private static final Rect BOUNDS = new Rect();
     private static final RectF OVAL = new RectF();
@@ -70,7 +72,16 @@ final class Ui {
             displayMedium = g500;
             displaySemibold = g500;
         }
+        stadium = semibold;
+        if (has(a, STADIUM)) {
+            try {
+                stadium = Typeface.createFromAsset(a, STADIUM);
+            } catch (RuntimeException ignored) {
+            }
+        }
     }
+
+    private static final String STADIUM = "fonts/Anton-Regular.ttf";
 
     private static Typeface systemFont(int weight) {
         java.io.File f = new java.io.File("/system/fonts/Google_Sans-" + weight + "-100_0-0_0.ttf");

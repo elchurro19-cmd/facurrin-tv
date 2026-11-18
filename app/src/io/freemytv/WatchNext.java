@@ -317,7 +317,23 @@ final class WatchNext {
             c.header = !listed ? "CONTINUAR VIENDO" : wn.get(0).listed ? "MI LISTA" : "CONTINUAR VIENDO · MI LISTA";
             return c;
         }
-        if (pkg.equals(SPOTIFY)) {   // always the top three in Argentina
+        if (pkg.equals(SPOTIFY)) {
+            // Glass edition: what played on this TV first (song over artist; OK opens the artist), the top three in
+            // Argentina only until something has played here.
+            List<Entry> h = MediaHistory.get(context).recent(pkg, 3);
+            if (!h.isEmpty()) {
+                c.variant = ROW_SQUARE;
+                c.header = "ESCUCHADO EN ESTA TELE";
+                for (Entry e : h) {
+                    if (!e.sub.isEmpty()) {
+                        String artist = e.title;
+                        e.title = e.sub;
+                        e.sub = artist;
+                    }
+                    c.items.add(e);
+                }
+                return c;
+            }
             if (spotifyPicks == null || spotifyPicks.isEmpty()) return null;
             c.variant = ROW_SQUARE;
             c.header = "TOP 3 ARGENTINA";

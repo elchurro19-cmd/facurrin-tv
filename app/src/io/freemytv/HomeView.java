@@ -95,7 +95,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     // Glass edition: CleanYourTV Glass's dock size (tiles up to 279 × 157 with five apps; more apps, smaller tiles),
     // keeping the same bottom edge (was 850, 84).
     private static final float L_PLATTER_TOP = 777, L_TILE_H = 157;
-    private static final float L_DATE_BASE = 330, L_CLOCK_BASE = 540, L_WEATHER_BASE = 626, L_QUOTES_BASE = 694;
+    private static final float L_DATE_BASE = 330, L_CLOCK_BASE = 540, L_WEATHER_BASE = 626, L_QUOTES_BASE = 700;
+    // Glass edition clock block: the date centered over a big "stadium" clock, the weather loose under it (icon, big
+    // temperature, condition, high and low) and the next four hours; the games under all that (L_QUOTES_BASE).
+    private static final float G_LEFT = 72, G_DATE_BASE = 190, G_CLOCK_BASE = 476, G_TEMP_BASE = 566, G_HOUR_BASE = 636;
     private static final float RECENT_W = 196, RECENT_GAP = 24, RECENT_TOP = 368;   // compact (was 268)
     private static final int L_INK = 0xFF1D1D1F, L_DIM = 0xFF6E6E73, L_FAINT = 0xFF8E8E93;
     private static String[] tabs;
@@ -182,6 +185,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private final RectF[] cardRects = new RectF[3];
     private final List<HomeApps.Item> lightButtons = new ArrayList<>();
     private Paint lTitle, lTab, lTabOn, lCardTitle, lCardMeta, lMatch, lTip, lDate, lClock, lWeather, lClockMatch;
+    private Paint gDateBold, gDate, gClock, gTemp, gCond, gCondDim, gHour, gHourTemp;
     private Shader lightGradient;
 
     // Shelf
@@ -1089,8 +1093,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         measure(status, Math.round(1160 * kk), Math.round(240 * kk));
         // Sized to what they draw (the glass and its shadow; the grown tiles and their shadows): smaller layers are
         // cheaper for the GPU to composite on every frame of the drawer animation.
-        measure(platter, width, Math.round(320 * kk));
-        measure(tiles, width, Math.round(270 * kk));
+        // Glass edition: taller, for the bigger dock and the focused tile rising out of it (were 320 and 270).
+        measure(platter, width, Math.round(380 * kk));
+        measure(tiles, width, Math.round(340 * kk));
         measure(drawerLayer, width, Math.round(600 * kk));
         measure(sheetLayer, width, height);
         measure(toastLayer, Math.round(1000 * kk), Math.round(220 * kk));
@@ -1109,8 +1114,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         place(heroLayer, 0, 0);
         watchLayer.layout(0, 0, width, height);
         place(status, width - status.getMeasuredWidth(), 0);
-        place(platter, 0, Math.round(750 * kk));
-        place(tiles, 0, Math.round(790 * kk));
+        place(platter, 0, Math.round(700 * kk));
+        place(tiles, 0, Math.round(740 * kk));
         place(drawerLayer, 0, Math.round(470 * kk));
         sheetLayer.layout(0, 0, width, height);
         dimLayer.layout(0, 0, width, height);
@@ -1168,6 +1173,21 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         lClock = Ui.numbers(Ui.light, 200 * k, L_INK);
         lClock.setLetterSpacing(-0.01f);
         lWeather = Ui.text(Ui.medium, 34 * k, L_DIM);
+        gDateBold = Ui.text(Ui.semibold, 28 * k, L_INK);
+        gDateBold.setLetterSpacing(0.16f);
+        gDate = Ui.text(Ui.medium, 28 * k, L_INK);
+        gDate.setLetterSpacing(0.16f);
+        gClock = Ui.numbers(Ui.stadium, 276 * k, L_INK);
+        gClock.setLetterSpacing(0.01f);
+        gTemp = Ui.numbers(Ui.stadium, 62 * k, L_INK);
+        gTemp.setLetterSpacing(0.02f);
+        gCond = Ui.text(Ui.semibold, 28 * k, L_INK);
+        gCondDim = Ui.numbers(Ui.medium, 22 * k, L_DIM);
+        gHour = Ui.numbers(Ui.medium, 19 * k, L_DIM);
+        gHourTemp = Ui.numbers(Ui.semibold, 22 * k, L_INK);
+        for (Paint p : new Paint[] {gDateBold, gDate, gClock, gTemp, gCond, gCondDim, gHour, gHourTemp}) {
+            p.setShadowLayer(16 * k, 0, 2 * k, 0x4D000000);
+        }
         lClockMatch = Ui.numbers(Ui.medium, 28 * k, L_DIM);
         lightGradient = null;
         buttonPaint = Ui.text(Ui.semibold, 29 * k, INK);
@@ -3921,24 +3941,100 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         return Recs.hasKey(getContext());
     }
 
+    // Glass edition: the date's two halves ("MARTES", "17 DE NOVIEMBRE") and the weather's texts, made again only when
+    // the date, the forecast, the settings or the language change.
+    private String gDateKey = "", gWeekday = "", gDayMonth = "";
+    private String gTempText = "", gCondText = "", gHiLoText = "";
+    private String[] gHourText = new String[0], gHourTempText = new String[0], gHourSymbol = new String[0];
+
+    private void refreshGlassDate() {
+        if (dateText.equals(gDateKey)) return;
+        gDateKey = dateText;
+        java.util.Locale loc = Ui.locale();
+        int comma = dateText.indexOf(',');
+        gWeekday = (comma > 0 ? dateText.substring(0, comma) : dateText).trim().toUpperCase(loc);
+        gDayMonth = comma > 0 ? dateText.substring(comma + 1).trim().toUpperCase(loc) : "";
+    }
+
+    private void refreshGlassWeather(HomeData.Weather wx) {
+        if (data.weatherAt == weatherLineAt && Prefs.version == weatherLinePrefs && Ui.language.equals(weatherLineLanguage)) return;
+        weatherLineAt = data.weatherAt;
+        weatherLinePrefs = Prefs.version;
+        weatherLineLanguage = Ui.language;
+        gTempText = HomeData.degrees(wx.temp);
+        gCondText = HomeData.condition(wx.code, wx.isDay);
+        gHiLoText = Double.isNaN(wx.max) || Double.isNaN(wx.min) ? ""
+                : "↑ " + HomeData.degrees(wx.max) + "     ↓ " + HomeData.degrees(wx.min);
+        int n = Math.min(4, Math.min(wx.hours.size(), Math.min(wx.hourTemp.size(), wx.hourCode.size())));
+        String[] at = new String[n], temp = new String[n], sym = new String[n];
+        java.text.SimpleDateFormat hour = new java.text.SimpleDateFormat("H", Ui.locale());
+        for (int i = 0; i < n; i++) {
+            at[i] = hour.format(new java.util.Date(wx.hours.get(i))) + " h";
+            temp[i] = HomeData.degrees(wx.hourTemp.get(i));
+            boolean day = i < wx.hourDay.size() ? wx.hourDay.get(i) : wx.isDay;
+            sym[i] = Symbols.weather(wx.hourCode.get(i), day);
+        }
+        gHourText = at;
+        gHourTempText = temp;
+        gHourSymbol = sym;
+    }
+
     private void drawClock(Canvas c) {
-        float x = MARGIN * k;
-        c.drawText(dateText, x - Ui.leftBearing(lDate, dateText), L_DATE_BASE * k, lDate);
-        c.drawText(clockText, x - Ui.leftBearing(lClock, clockText), L_CLOCK_BASE * k, lClock);
+        int ink = lClock.getColor(), dim = Ui.alpha(ink, 0.74f);
+        float x = G_LEFT * k;
+        // The date, centered over the clock: the weekday bold, a dot, the day and month lighter.
+        refreshGlassDate();
+        float cw = gClock.measureText(clockText);
+        float ww = gDateBold.measureText(gWeekday), gap = 18 * k;
+        float dw = ww + (gDayMonth.isEmpty() ? 0 : 2 * gap + gDate.measureText(gDayMonth));
+        float dx = x + Math.max(0, (cw - dw) / 2), base = G_DATE_BASE * k;
+        gDateBold.setColor(ink);
+        c.drawText(gWeekday, dx, base, gDateBold);
+        if (!gDayMonth.isEmpty()) {
+            fill.setShader(null);
+            fill.setColor(Ui.alpha(ink, 0.6f));
+            c.drawCircle(dx + ww + gap, base - Ui.halfCap(gDate), 4.5f * k, fill);
+            gDate.setColor(Ui.alpha(ink, 0.85f));
+            c.drawText(gDayMonth, dx + ww + 2 * gap, base, gDate);
+        }
+        gClock.setColor(ink);
+        c.drawText(clockText, x - Ui.leftBearing(gClock, clockText), G_CLOCK_BASE * k, gClock);
         HomeData.Weather wx = data.weather;
         if (!Prefs.weather() || Double.isNaN(wx.temp)) return;
-        if (data.weatherAt != weatherLineAt || Prefs.version != weatherLinePrefs || !Ui.language.equals(weatherLineLanguage)) {
-            weatherLineAt = data.weatherAt;
-            weatherLinePrefs = Prefs.version;
-            weatherLineLanguage = Ui.language;
-            weatherLine = HomeData.degrees(wx.temp) + "  " + HomeData.condition(wx.code, wx.isDay) + "   "
-                    + HomeData.highLow(wx, "  ");
-        }
-        float size = 40 * k, base = L_WEATHER_BASE * k;
+        refreshGlassWeather(wx);
+        // Now: the condition's symbol, the temperature big, and beside it the condition over the high and the low.
+        base = G_TEMP_BASE * k;
+        float size = 60 * k;
         String symbol = Symbols.weather(wx.code, wx.isDay);
         float sw = Symbols.width(getContext(), symbol, size);
-        Symbols.draw(getContext(), c, symbol, x + sw / 2, base - Ui.halfCap(lWeather), size, lWeather.getColor());
-        c.drawText(weatherLine, x + sw + 16 * k, base, lWeather);
+        Symbols.draw(getContext(), c, symbol, x + sw / 2, base - Ui.cap(gTemp) / 2, size, ink);
+        float tx = x + sw + 18 * k;
+        gTemp.setColor(ink);
+        c.drawText(gTempText, tx, base, gTemp);
+        float lx = tx + gTemp.measureText(gTempText) + 24 * k;
+        gCond.setColor(ink);
+        c.drawText(gCondText, lx, base - Ui.cap(gTemp) + Ui.cap(gCond), gCond);
+        if (!gHiLoText.isEmpty()) {
+            gCondDim.setColor(dim);
+            c.drawText(gHiLoText, lx, base, gCondDim);
+        }
+        // The next hours, each after a thin line: the hour, its symbol and its temperature.
+        float hb = G_HOUR_BASE * k, col = 156 * k, isz = 26 * k;
+        for (int i = 0; i < gHourText.length; i++) {
+            float hx = x + i * col;
+            fill.setShader(null);
+            fill.setColor(Ui.alpha(ink, 0.25f));
+            c.drawRect(hx, hb - 28 * k, hx + 2 * k, hb + 6 * k, fill);
+            float px = hx + 14 * k;
+            gHour.setColor(dim);
+            c.drawText(gHourText[i], px, hb, gHour);
+            px += gHour.measureText(gHourText[i]) + 8 * k;
+            float hs = Symbols.width(getContext(), gHourSymbol[i], isz);
+            Symbols.draw(getContext(), c, gHourSymbol[i], px + hs / 2, hb - Ui.halfCap(gHourTemp), isz, ink);
+            px += hs + 6 * k;
+            gHourTemp.setColor(ink);
+            c.drawText(gHourTempText[i], px, hb, gHourTemp);
+        }
     }
 
     /**
@@ -4079,11 +4175,13 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     // MARK: - "Continuar viendo" (centre right, for the focused app of the shelf)
 
     private static final long WATCH_DEBOUNCE_MS = 220;
-    private static final float WATCH_PAD = 22, WATCH_HEADER = 38, WATCH_TOP = 54;
-    // Every app gets the same island: up to three small cards (the latest three to resume, seen or heard).
-    private static final float WATCH_COL = 188, WATCH_COL_GAP = 16, WATCH_THUMB_H = 106;
-    /** Vertical centre: midway between the buttons at the top and the shelf. */
-    private static final float WATCH_CY = 540;
+    // Glass edition: the island as big as the music player that opens in its place, beside the clock (was 22, 38, 54;
+    // 188, 16, 106; centre 540).
+    private static final float WATCH_PAD = 30, WATCH_HEADER = 48, WATCH_TOP = 70;
+    // Every app gets the same island: up to three cards (the latest three to resume, seen or heard).
+    private static final float WATCH_COL = 300, WATCH_COL_GAP = 26, WATCH_THUMB_H = 168;
+    /** Vertical centre: beside the clock, between the buttons at the top and the shelf. */
+    private static final float WATCH_CY = 452;
     private WatchNext.Content watch, watchWaiting;
     private boolean watchSwap;
     /** The app it follows: the focused shelf app (kept while the focus is up in the widget or the top row). */
@@ -4223,16 +4321,16 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private void layoutWatch() {
         WatchNext.Content c = watch;
         if (c == null) return;
-        if (watchHead == null || watchHead.getTextSize() != 18 * k) {
-            watchHead = new TextPaint(Ui.text(Ui.semibold, 18 * k, 0xB3FFFFFF));
-            watchHead.setLetterSpacing(0.08f);
-            watchTitle = new TextPaint(Ui.text(Ui.semibold, 20 * k, 0xF2FFFFFF));
-            watchSub = new TextPaint(Ui.text(Ui.medium, 17 * k, 0xADFFFFFF));
+        if (watchHead == null || watchHead.getTextSize() != 20 * k) {
+            watchHead = new TextPaint(Ui.text(Ui.semibold, 20 * k, 0xB3FFFFFF));
+            watchHead.setLetterSpacing(0.1f);
+            watchTitle = new TextPaint(Ui.text(Ui.semibold, 24 * k, 0xF2FFFFFF));
+            watchSub = new TextPaint(Ui.text(Ui.medium, 19 * k, 0xADFFFFFF));
         }
         float right = CONTENT_R * k, pad = WATCH_PAD * k, col = WATCH_COL * k, gap = WATCH_COL_GAP * k;
         // Always three columns wide, however many cards: every app's island is the same size.
         float w = Math.max(3 * col + 2 * gap, watchHead.measureText(c.header)) + 2 * pad;
-        float h = (WATCH_TOP + WATCH_THUMB_H + 86) * k, t = WATCH_THUMB_H * k;
+        float h = (WATCH_TOP + WATCH_THUMB_H + 92) * k, t = WATCH_THUMB_H * k;
         watchCard.set(right - w, WATCH_CY * k - h / 2, right, WATCH_CY * k + h / 2);
         int brand = HomeApps.brandColor(c.pkg);
         watchColor = brand != 0 ? brand : 0xFFFFFFFF;
@@ -4264,7 +4362,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         if (wc == null) return;
         float eased = 1, a = 1;   // the layer's alpha fades it (placeWatch)
         c.save();
-        drawerGlass(c, watchCard, 30 * k, 0.72f, 0x1A000000, 10 * k, 1);
+        drawerGlass(c, watchCard, 40 * k, 0.72f, 0x1A000000, 10 * k, 1);
         watchHead.setColor(Ui.alpha(tone(L_DIM, 0xB3FFFFFF), a));
         c.drawText(wc.header, watchHeadX, watchCard.top + WATCH_HEADER * k, watchHead);
         int ink = tone(L_INK, 0xFFFFFFFF), dim = tone(L_DIM, 0xADFFFFFF);
@@ -4302,13 +4400,13 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 tx += WATCH_COL * k / 2;
                 align = Paint.Align.CENTER;
             }
-            float base = r.bottom + 34 * k;
+            float base = r.bottom + 40 * k;
             watchTitle.setTextAlign(align);
             watchSub.setTextAlign(align);
             watchTitle.setColor(Ui.alpha(ink, (0.85f + 0.15f * f) * a));
             c.drawText(watchTitles[i], tx, base, watchTitle);
             watchSub.setColor(Ui.alpha(dim, a));
-            c.drawText(watchSubs[i], tx, base + 26 * k, watchSub);
+            c.drawText(watchSubs[i], tx, base + 30 * k, watchSub);
             watchTitle.setTextAlign(Paint.Align.LEFT);
             watchSub.setTextAlign(Paint.Align.LEFT);
         }
