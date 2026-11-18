@@ -1238,7 +1238,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         if (reorderAnim) tilesMoving |= stepReorder(dt, up);
         boolean statusMoving = step(statusFocus, dt);
         boolean heroMoving = heroFocus.step(dt);
-        boolean topMoving = step(topFocus, dt) | step(playerFocus, dt) | step(avatarFocus, dt) | step(npExpand, dt) | step(ctrlFocus, dt) | step(ctrlShow, dt), cardsMoving = step(cardFocus, dt) | step(recentFocus, dt);
+        boolean topMoving = step(topFocus, dt) | step(playerFocus, dt) | step(avatarFocus, dt) | step(npExpand, dt) | step(ctrlFocus, dt) | step(ctrlShow, dt) | step(npOpen, dt), cardsMoving = step(cardFocus, dt) | step(recentFocus, dt);
+        if (topMoving) placeWatch();   // the island fades out while the player opens in its place
         boolean watchMoving = step(watchFocus, dt), watchFading = step(watchShow, dt) | step(watchActive, dt);
         if (watchSwap && watchShow[0].value < 0.03f) showWatch(watchWaiting);   // the old one faded: the new one comes in
         if (topMoving) status.invalidate();
@@ -1329,6 +1330,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         float show = Ui.clamp(watchShow[0].value), eased = show * show * (3 - 2 * show);
         float d = drawer.value, top = (1 - Ui.clamp(sheet.value)) * (1 - smoothstep(0, 0.32f, Ui.clamp(d)));
         float alpha = watch == null ? 0 : top * eased * (0.8f + 0.2f * Ui.clamp(watchActive[0].value));
+        alpha *= 1 - Ui.clamp(npOpen[0].value);
         show(watchLayer, alpha, -d * SHIFT * k + (1 - eased) * 14 * k);
     }
 
@@ -2672,6 +2674,13 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             ctrlShow[0].target = show;
             statusChanged = true;
         }
+        // The open player stays open only while the focus is on its controls.
+        boolean open = !sheetOpen && npOpened && zone == Z_PLAYER_CTRL;
+        if (!open) npOpened = false;
+        if (npOpen[0].target != (open ? 1 : 0)) {
+            npOpen[0].target = open ? 1 : 0;
+            statusChanged = heroChanged = true;
+        }
         statusChanged |= topChanged;
         tilesDirty |= snap || tilesChanged;
         statusDirty |= snap || statusChanged;
@@ -3044,6 +3053,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             retarget(false);
         } else if (zone == Z_IDLE) {
             return;
+        } else if (npOpened && zone == Z_PLAYER_CTRL) {
+            zone = Z_PLAYER;   // the open player closes back into its capsule
+            retarget(false);
         } else if (zone != Z_SHELF) {
             zone = Z_SHELF;
             retarget(false);
@@ -3273,10 +3285,14 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             }
             return;
         } else if (zone == Z_PLAYER) {
-            npCollapsed = !npCollapsed;
-            ctrlShow[0].target = npCollapsed ? 0 : 1;
-            npExpand[0].target = npCollapsed ? 0 : 1;
-            statusDirty = true;
+            // Glass edition: OK opens the player beside the clock, with its controls (play/pause focused).
+            npCollapsed = false;
+            npExpand[0].target = 1;
+            npOpened = true;
+            zone = Z_PLAYER_CTRL;
+            ctrlIndex = indexOfKind(C_PLAY);
+            retarget(false);
+            statusDirty = heroDirty = true;
             click.open();
             return;
         } else if (zone == Z_PLAYER_CTRL) {
@@ -3902,6 +3918,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         if (!picksOn()) {
             drawClock(c);
             if (Prefs.futbol()) drawFutbolRow(c);
+            drawNpCard(c);
             return;
         }
         String hello = Ui.tr("For You");
@@ -4454,6 +4471,12 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             boolean eq = nowPlaying != null && nowPlaying.playing && nowPlaying.visible();
             if (nowPlaying != null) {
                 statusDirty = true;
+                // The open player's progress moves once a second (its layer is big: not twelve times).
+                long now = SystemClock.uptimeMillis();
+                if (npOpened && now - npHeroAt >= 1000) {
+                    npHeroAt = now;
+                    heroDirty = true;
+                }
                 wake();
             }
             if (eq) handler.postDelayed(this, EQ_FRAME);
@@ -4475,8 +4498,147 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         restartTick();
     }
 
-    /** Cover, title and artist, in a glass capsule like the buttons beside it. */
+    // MARK: - Glass edition: the player that opens beside the clock (OK on the capsule)
+
+    /** 0 = closed (the capsule at the top right), 1 = the player beside the clock; a light bounce as it arrives. */
+    private final Spring[] npOpen = {new Spring(0.28f, 0.74f, 0)};
+    private boolean npOpened;
+    private long npHeroAt;
+    private static final float NPC_W = 1074, NPC_H = 330, NPC_TOP = 288, NPC_PAD = 36, NPC_COVER = 234;
+    /** The waveform's shape (static: measuring the sound cost the TV too much), 0 to 1 per bar. */
+    private static final float[] WAVE = {0.16f, 0.28f, 0.4f, 0.25f, 0.5f, 0.66f, 0.44f, 0.33f, 0.56f, 0.78f, 0.6f, 0.42f,
+            0.72f, 0.9f, 0.66f, 0.5f, 0.84f, 0.95f, 0.72f, 0.56f, 0.4f, 0.6f, 0.84f, 1f, 0.78f, 0.56f, 0.44f, 0.66f, 0.9f,
+            0.72f, 0.5f, 0.33f, 0.56f, 0.78f, 0.95f, 0.84f, 0.6f, 0.44f, 0.66f, 0.84f, 0.72f, 0.5f, 0.4f, 0.6f, 0.78f,
+            0.56f, 0.4f, 0.28f, 0.5f, 0.66f, 0.84f, 0.6f, 0.44f, 0.33f, 0.56f, 0.72f, 0.5f, 0.33f, 0.22f, 0.16f};
+    private final RectF npCard = new RectF(), npMorph = new RectF();
+    private TextPaint npcLabel, npcTitle, npcArtist, npcTime;
+    private int npcVersion = -1;
+    private CharSequence npcTitleText = "", npcArtistText = "";
+    private String npcLabelText = "";
+
+    private void drawNpCard(Canvas c) {
+        float e = npOpen[0].value;
+        NowPlaying np = nowPlaying;
+        if (e <= 0.01f || np == null || !np.visible()) return;
+        float right = CONTENT_R * k;
+        npCard.set(right - NPC_W * k, NPC_TOP * k, right, (NPC_TOP + NPC_H) * k);
+        // It grows out of the capsule: from its place and size to the player's (the spring overshoots a little).
+        RectF from = npRect.isEmpty() ? npCard : npRect;
+        npMorph.set(lerp(from.left, npCard.left, e), lerp(from.top, npCard.top, e), lerp(from.right, npCard.right, e),
+                lerp(from.bottom, npCard.bottom, e));
+        float rad = lerp(from.height() / 2, 40 * k, Ui.clamp(e));
+        drawerGlass(c, npMorph, rad, 0.72f, 0x1A000000, 10 * k, Ui.clamp(e * 3));
+        float te = Ui.clamp((e - 0.55f) / 0.45f);   // the content fades in once it's mostly open
+        if (te <= 0.01f) return;
+        c.save();
+        c.clipRect(npMorph);
+        float pad = NPC_PAD * k, cs = NPC_COVER * k, L = npCard.left, T = npCard.top;
+        // The cover.
+        cell.set(L + pad, T + pad, L + pad + cs, T + pad + cs);
+        int alpha = Math.round(255 * te);
+        if (np.art != null) {
+            bitmapPaint.setAlpha(alpha);
+            imageFill.setAlpha(alpha);
+            roundImage(c, np.art, cell, 22 * k);
+            bitmapPaint.setAlpha(255);
+            imageFill.setAlpha(255);
+        } else {
+            fill.setShader(null);
+            fill.setColor(Ui.alpha(0x24FFFFFF, te));
+            c.drawRoundRect(cell, 22 * k, 22 * k, fill);
+        }
+        // Where it plays, the title big and the artist.
+        if (npcTitle == null || npcTitle.getTextSize() != 52 * k) {
+            npcLabel = new TextPaint(Ui.text(Ui.semibold, 19 * k, 0xB3FFFFFF));
+            npcLabel.setLetterSpacing(0.14f);
+            npcTitle = new TextPaint(Ui.text(Ui.displaySemibold, 52 * k, 0xFFFFFFFF));
+            npcArtist = new TextPaint(Ui.text(Ui.medium, 30 * k, 0xD9FFFFFF));
+            npcTime = new TextPaint(Ui.numbers(Ui.semibold, 20 * k, 0xE6FFFFFF));
+            npcVersion = -1;
+        }
+        float tx = cell.right + pad, tw = npCard.right - pad - tx;
+        if (np.version != npcVersion) {
+            npcVersion = np.version;
+            npcTitleText = TextUtils.ellipsize(np.title, npcTitle, tw, TextUtils.TruncateAt.END);
+            npcArtistText = TextUtils.ellipsize(np.artist, npcArtist, tw, TextUtils.TruncateAt.END);
+            String app = np.pkg == null ? "" : shelfLabel(np.pkg);
+            npcLabelText = ("Reproduciendo" + (app.isEmpty() || app.equals(np.pkg) ? "" : "  ·  " + app))
+                    .toUpperCase(Ui.locale());
+        }
+        npcLabel.setColor(Ui.alpha(0xB3FFFFFF, te));
+        c.drawText(npcLabelText, tx, T + pad + Ui.cap(npcLabel), npcLabel);
+        npcTitle.setColor(Ui.alpha(0xFFFFFFFF, te));
+        c.drawText(npcTitleText, 0, npcTitleText.length(), tx, T + 128 * k, npcTitle);
+        npcArtist.setColor(Ui.alpha(0xD9FFFFFF, te));
+        c.drawText(npcArtistText, 0, npcArtistText.length(), tx, T + 174 * k, npcArtist);
+        // The controls, in a row under the artist: glass circles, the focused one white; play/pause bigger.
+        updateCtrlKinds(np);
+        float cy = T + 236 * k, x = tx;
+        for (int i = 0; i < ctrlKinds.length; i++) {
+            int kind = ctrlKinds[i];
+            float f = Ui.clamp(ctrlFocus[i].value), dia = (kind == C_PLAY ? 76 : 62) * k * (1 + 0.08f * f), r = dia / 2;
+            float cx = x + r;
+            cell.set(cx - r, cy - r, cx + r, cy + r);
+            fill.setShader(null);
+            fill.setColor(Ui.alpha(kind == C_PLAY ? 0xFFFFFFFF : 0x2EFFFFFF, te * (kind == C_PLAY ? 1 - f * 0 : 1)));
+            if (f > 0.01f && kind != C_PLAY) fill.setColor(Ui.alpha(blend(0x2EFFFFFF, 0xFFFFFFFF, f), te));
+            c.drawCircle(cx, cy, r, fill);
+            if (f > 0.01f) {   // the focus: a white ring around it
+                focusRing.setStrokeWidth(3.5f * k);
+                focusRing.setColor(Ui.alpha(0xFFFFFFFF, 0.95f * f * te));
+                c.drawCircle(cx, cy, r + 6 * k, focusRing);
+            }
+            boolean dark = kind == C_PLAY || f > 0.5f;
+            fill.setColor(Ui.alpha(dark ? 0xFF141414 : 0xF2FFFFFF, te));
+            boolean active = (kind == C_SHUFFLE && np.shuffleOn) || (kind == C_REPEAT && np.repeatMode != 0);
+            if (active && !dark) fill.setColor(Ui.alpha(0xFF30D158, te));
+            drawControlGlyph(c, kind == C_PLAY ? (np.playing ? 3 : 1) : kind, cx, cy, r * 0.36f);
+            x += dia + 18 * k;
+        }
+        // The progress as a waveform across the foot: what played white (its last bar glowing), the rest faint.
+        float p = np.progress(), by = npCard.bottom - 34 * k;
+        String done = time(np.duration * p), left = "-" + time(np.duration * (1 - p));
+        npcTime.setColor(Ui.alpha(0xE6FFFFFF, te));
+        float lw = npcTime.measureText(done), rw = npcTime.measureText(left);
+        float wl = L + pad, wr = npCard.right - pad;
+        c.drawText(done, wl, by + Ui.halfCap(npcTime), npcTime);
+        c.drawText(left, wr - rw, by + Ui.halfCap(npcTime), npcTime);
+        float a0 = wl + lw + 22 * k, a1 = wr - rw - 22 * k, bw = 6 * k;
+        float step = (a1 - a0 - bw) / (WAVE.length - 1);
+        int played = Math.round(p * WAVE.length);
+        for (int i = 0; i < WAVE.length; i++) {
+            float bh = (6 + 34 * WAVE[i]) * k, bx = a0 + i * step;
+            fill.setColor(Ui.alpha(i < played ? 0xFFFFFFFF : 0x47FFFFFF, te));
+            tmp.set(bx, by - bh / 2, bx + bw, by + bh / 2);
+            c.drawRoundRect(tmp, bw / 2, bw / 2, fill);
+        }
+        c.restore();
+    }
+
+    private static float lerp(float a, float b, float t) {
+        return a + (b - a) * t;
+    }
+
+    private static String time(float ms) {
+        long s = Math.max(0, Math.round(ms / 1000));
+        return (s / 60) + ":" + (s % 60 < 10 ? "0" : "") + (s % 60);
+    }
+
+    /** Glass edition: the capsule fades out while the player opens beside the clock (it grows out of it). */
     private void drawNowPlaying(Canvas c) {
+        float hide = 1 - Ui.clamp(npOpen[0].value * 1.8f);
+        if (hide <= 0.01f) return;
+        if (hide >= 0.99f) {
+            drawNowPlayingCapsule(c);
+            return;
+        }
+        int saved = c.saveLayerAlpha(0, 0, w, 240 * k, Math.round(255 * hide));
+        drawNowPlayingCapsule(c);
+        c.restoreToCount(saved);
+    }
+
+    /** Cover, title and artist, in a glass capsule like the buttons beside it. */
+    private void drawNowPlayingCapsule(Canvas c) {
         NowPlaying np = nowPlaying;
         if (np == null || !np.visible()) return;
         RectF first = topRects[3];
@@ -4558,7 +4720,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
      * into place while the widget (or one of them) has focus. Focused: white with dark ink.
      */
     private void drawPlayerControls(Canvas c) {
-        float show = Ui.clamp(ctrlShow[0].value);
+        float show = Ui.clamp(ctrlShow[0].value) * (1 - Ui.clamp(npOpen[0].value * 2.5f));   // open: they're in the player
         NowPlaying np = nowPlaying;
         if (show <= 0.01f || np == null || !np.visible()) return;
         updateCtrlKinds(np);
