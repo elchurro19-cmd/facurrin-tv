@@ -5101,23 +5101,36 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             c.drawText(total, a1 - npcTime.measureText(total), by + 40 * k, npcTime);
         }
         c.restore();
-        // The capsule's own row of glass buttons: under the compact card, inside the whole one (it drops into it).
+        // Option B: previous, play/pause and next together in one glass pill, shuffle and repeat as bare symbols on
+        // its sides. The focused one sits on a white disc.
         updateCtrlKinds(np);
         int n = ctrlKinds.length;
-        float dia = 54 * k, gap = 14 * k;
-        float cy = lerp(T + (NPC_H1 + 22) * k + dia / 2, T + (NPC_H2 - 30) * k - dia / 2, fo);
-        float x0 = npCard.centerX() - (n - 1) * (dia + gap) / 2;
+        float step = 70 * k, side = 92 * k;
+        float cy = lerp(T + (NPC_H1 + 22) * k + 28 * k, T + (NPC_H2 - 30) * k - 28 * k, fo);
+        float mid = npCard.centerX();
+        float ph = 64 * k, pw = 2 * step + 64 * k;
+        tmp.set(mid - pw / 2, cy - ph / 2, mid + pw / 2, cy + ph / 2);
+        fill.setShader(null);
+        fill.setColor(Ui.alpha(0x26FFFFFF, te));
+        c.drawRoundRect(tmp, ph / 2, ph / 2, fill);
+        if (watchRim == null) {
+            watchRim = new Paint(Paint.ANTI_ALIAS_FLAG);
+            watchRim.setStyle(Paint.Style.STROKE);
+        }
+        watchRim.setStrokeWidth(1.5f * k);
+        watchRim.setColor(Ui.alpha(0x66FFFFFF, te));
+        c.drawRoundRect(tmp, ph / 2, ph / 2, watchRim);
         for (int i = 0; i < n; i++) {
             int kind = ctrlKinds[i];
-            float cf = Ui.clamp(ctrlFocus[i].value), s = 1 + 0.12f * cf, r = dia / 2 * s * (kind == C_PLAY ? 1.12f : 1);
-            float cx = x0 + i * (dia + gap);
-            cell.set(cx - r, cy - r, cx + r, cy + r);
-            tmp.set(cell);
-            tmp.offset(0, (4 + 6 * cf) * k);
-            shadow.setColor(Ui.alpha(0xFF000000, (0.28f + 0.15f * cf) * te));
-            shadows.draw(c, tmp, r, SHADOW_BLUR * 0.7f * k, shadow);
-            scene.liquid(c, cell, r, tone(0xFFFFFFFF, SMOKE), tone(0.55f, 0.5f), tone(0.02f, 0.01f), 10 * k, 7 * k,
-                    tone(0.6f, 0.45f), te * (1 - cf));
+            float cx;
+            switch (kind) {
+                case C_SHUFFLE: cx = mid - pw / 2 - side / 2 - 6 * k; break;
+                case C_PREV: cx = mid - step; break;
+                case C_NEXT: cx = mid + step; break;
+                case C_REPEAT: cx = mid + pw / 2 + side / 2 + 6 * k; break;
+                default: cx = mid;
+            }
+            float cf = Ui.clamp(ctrlFocus[i].value), r = (kind == C_PLAY ? 27 : 24) * k * (1 + 0.1f * cf);
             if (cf > 0.01f) {
                 fill.setColor(Ui.alpha(0xFFFFFFFF, cf * te));
                 c.drawCircle(cx, cy, r, fill);
@@ -5125,7 +5138,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             fill.setColor(Ui.alpha(blend(0xF2FFFFFF, 0xFF141414, cf), te));
             boolean active = (kind == C_SHUFFLE && np.shuffleOn) || (kind == C_REPEAT && np.repeatMode != 0);
             if (active && cf < 0.5f) fill.setColor(Ui.alpha(npcAccent, te));
-            drawControlGlyph(c, kind == C_PLAY ? (np.playing ? 3 : 1) : kind, cx, cy, r * 0.38f);
+            float u = (kind == C_PLAY ? 15 : kind == C_SHUFFLE || kind == C_REPEAT ? 11 : 12) * k;
+            drawControlGlyph(c, kind == C_PLAY ? (np.playing ? 3 : 1) : kind, cx, cy, u);
         }
     }
 
@@ -5291,7 +5305,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     }
 
     private void updateCtrlKinds(NowPlaying np) {
-        int n = 4 + (np.canShuffle() ? 1 : 0) + (np.canRepeat() ? 1 : 0);
+        // Glass edition: no stop button (shuffle and repeat flank the pill instead).
+        int n = 3 + (np.canShuffle() ? 1 : 0) + (np.canRepeat() ? 1 : 0);
         if (n == ctrlKinds.length) return;
         int[] k2 = new int[n];
         int i = 0;
@@ -5299,7 +5314,6 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         k2[i++] = C_PREV;
         k2[i++] = C_PLAY;
         k2[i++] = C_NEXT;
-        k2[i++] = C_STOP;
         if (np.canRepeat()) k2[i] = C_REPEAT;
         ctrlKinds = k2;
         ctrlIndex = Math.min(ctrlIndex, n - 1);
