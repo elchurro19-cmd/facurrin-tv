@@ -4318,7 +4318,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private String artKey = "", artLabel = "", artTitle = "", artSub = "", hintText = "", hintPkg = "";
     private float artProgress;
     private int artColor = 0xFFFFFFFF;
-    private final Paint artPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+    private final Paint artPaint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
     private TextPaint artLabelP, artTitleP, artSubP, hintP;
 
     /** A second on the same app: its latest content takes the background (tried again shortly while it loads). */
@@ -4359,7 +4359,12 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         wake();
     }
 
-    /** The picture, centre-cropped to 16:9 and blurred by shrinking it to almost nothing (drawn filtered, full screen). */
+    private static final int BLUR_W = 256, BLUR_H = 144, BLUR_R = 7;
+
+    /**
+     * The picture, centre-cropped to 16:9 and blurred for the full-screen background: scaled to 256×144 and given three
+     * box-blur passes each way (close to a Gaussian, so no blocks or steps), then drawn filtered and dithered.
+     */
     private static Bitmap blurOf(Bitmap b) {
         if (b == null || b.getWidth() < 2 || b.getHeight() < 2) return null;
         try {
@@ -4370,10 +4375,40 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 cw = Math.round(h * 16f / 9);
             }
             Bitmap crop = Bitmap.createBitmap(src, (w - cw) / 2, (h - ch) / 2, cw, ch);
-            Bitmap tiny = Bitmap.createScaledBitmap(crop, 32, 18, true);
-            return Bitmap.createScaledBitmap(tiny, 160, 90, true);
-        } catch (RuntimeException e) {
+            Bitmap small = Bitmap.createScaledBitmap(crop, BLUR_W, BLUR_H, true);
+            int[] px = new int[BLUR_W * BLUR_H], tmp = new int[px.length];
+            small.getPixels(px, 0, BLUR_W, 0, 0, BLUR_W, BLUR_H);
+            for (int pass = 0; pass < 3; pass++) {
+                boxBlur(px, tmp, BLUR_W, BLUR_H, BLUR_R, true);
+                boxBlur(tmp, px, BLUR_W, BLUR_H, BLUR_R, false);
+            }
+            Bitmap out = Bitmap.createBitmap(BLUR_W, BLUR_H, Bitmap.Config.ARGB_8888);
+            out.setPixels(px, 0, BLUR_W, 0, 0, BLUR_W, BLUR_H);
+            return out;
+        } catch (RuntimeException | OutOfMemoryError e) {
             return null;
+        }
+    }
+
+    /** One box-blur pass (a running sum, edges clamped), along the rows or the columns, from `in` to `out`. */
+    private static void boxBlur(int[] in, int[] out, int w, int h, int r, boolean rows) {
+        int lines = rows ? h : w, len = rows ? w : h, step = rows ? 1 : w, div = 2 * r + 1;
+        for (int l = 0; l < lines; l++) {
+            int base = rows ? l * w : l;
+            int sr = 0, sg = 0, sb = 0;
+            for (int i = -r; i <= r; i++) {
+                int p = in[base + Math.max(0, Math.min(len - 1, i)) * step];
+                sr += (p >> 16) & 255;
+                sg += (p >> 8) & 255;
+                sb += p & 255;
+            }
+            for (int i = 0; i < len; i++) {
+                out[base + i * step] = 0xFF000000 | ((sr / div) << 16) | ((sg / div) << 8) | (sb / div);
+                int add = in[base + Math.min(len - 1, i + r + 1) * step], sub = in[base + Math.max(0, i - r) * step];
+                sr += ((add >> 16) & 255) - ((sub >> 16) & 255);
+                sg += ((add >> 8) & 255) - ((sub >> 8) & 255);
+                sb += (add & 255) - (sub & 255);
+            }
         }
     }
 
