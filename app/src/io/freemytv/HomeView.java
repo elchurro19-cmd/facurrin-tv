@@ -2015,6 +2015,15 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     private void drawFutbolCard(Canvas c, RectF r) {
         drawerCard(c, r);
+        // Glass edition: only your club (Ajustes de inicio, Club favorito): its game now or next, and its last result.
+        Futbol.Match next = teamMatch(false), last = teamMatch(true);
+        if (next != null || last != null) {
+            String tkey = data.matchesAt + "|" + System.currentTimeMillis() / 60_000 + "|" + Float.floatToIntBits(dark()) + "|team";
+            if (Ui.LEGACY) futbolSnapshot.draw(c, r, tkey, cc -> drawTeamCard(cc, r, next, last));
+            else drawTeamCard(c, r, next, last);
+            drawCardFocus(c, r, Ui.clamp(futbolFocus[0].value), 0, 1);
+            return;
+        }
         refreshUpcomingText(r.width() - 68 * k);
         long now = System.currentTimeMillis();
         int pages = Math.max(1, cardPages.size());
@@ -2030,6 +2039,63 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     }
 
     private Paint cardRim;
+    private TextPaint teamBig, teamSmall;
+
+    /** Your club's game: being played or the next one (`done` false), or the last one played (`done` true). */
+    private Futbol.Match teamMatch(boolean done) {
+        long now = System.currentTimeMillis();
+        Futbol.Match best = null;
+        java.util.List<Futbol.Match> all = new java.util.ArrayList<>(data.matches);
+        all.addAll(data.upcoming);
+        for (Futbol.Match m : all) {
+            if (!m.club() || m.done() != done) continue;
+            if (best == null) best = m;
+            else if (!done && (m.live() || m.kickedOff(now)) && !(best.live() || best.kickedOff(now))) best = m;
+            else if (!done && !(best.live() || best.kickedOff(now)) && m.start < best.start) best = m;
+            else if (done && m.start > best.start) best = m;
+        }
+        return best;
+    }
+
+    private void drawTeamCard(Canvas c, RectF r, Futbol.Match next, Futbol.Match last) {
+        if (teamBig == null || teamBig.getTextSize() != 34 * k) {
+            teamBig = new TextPaint(Ui.text(Ui.semibold, 34 * k, 0xFFFFFFFF));
+            teamSmall = new TextPaint(Ui.text(Ui.medium, 22 * k, 0xB3FFFFFF));
+        }
+        float x = r.left + 34 * k, right = r.right - 34 * k;
+        Futbol.Match m = next != null ? next : last;
+        String club = m.home.id.equals(Futbol.CLUB) ? m.home.shortName : m.away.shortName;
+        c.drawText("Tu equipo  ·  " + club, x, r.top + 54 * k, cardTitle);
+        teamBig.setColor(cardText.getColor());
+        teamSmall.setColor(cardDim.getColor());
+        if (next != null) {
+            // The game: both crests big, the names (and the score once it starts), when and which tournament.
+            boolean scored = next.live() || next.done();
+            String line = next.home.shortName + (scored ? "   " + Futbol.score(next) + "   " : "  vs  ") + next.away.shortName;
+            float crest = 52 * k, base = r.top + 128 * k, mid = base - Ui.cap(teamBig) / 2;
+            drawCrest(c, next.home.crest, x, mid, crest, 1);
+            float tx = x + crest + 16 * k, lw = teamBig.measureText(line);
+            c.drawText(TextUtils.ellipsize(line, teamBig, right - tx - crest - 16 * k, TextUtils.TruncateAt.END).toString(), tx, base, teamBig);
+            drawCrest(c, next.away.crest, Math.min(tx + lw + 16 * k, right - crest), mid, crest, 1);
+            String when = Futbol.status(next, System.currentTimeMillis());
+            String round = next.round.isEmpty() ? next.league : next.round;
+            cardDimRight.setColor(next.live() ? LIVE_RED : cardDim.getColor());
+            Paint.Align was = cardDimRight.getTextAlign();
+            cardDimRight.setTextAlign(Paint.Align.LEFT);
+            c.drawText(when, x, base + 48 * k, cardDimRight);
+            cardDimRight.setTextAlign(was);
+            if (round != null && !round.isEmpty()) {
+                float ww = cardDimRight.measureText(when) + 18 * k;
+                c.drawText(TextUtils.ellipsize("·  " + round, teamSmall, right - x - ww, TextUtils.TruncateAt.END).toString(),
+                        x + ww, base + 48 * k, teamSmall);
+            }
+        }
+        if (last != null) {   // the last result, small, at the foot
+            String res = "Último:  " + last.home.shortName + "  " + Futbol.score(last) + "  " + last.away.shortName;
+            c.drawText(TextUtils.ellipsize(res, teamSmall, right - x, TextUtils.TruncateAt.END).toString(), x,
+                    r.bottom - 34 * k, teamSmall);
+        }
+    }
 
     /**
      * One small dot per page under the list, the current one larger and brighter. Past seven pages, a window of seven
