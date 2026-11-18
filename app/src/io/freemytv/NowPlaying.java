@@ -107,6 +107,24 @@ final class NowPlaying implements MediaSessionManager.OnActiveSessionsChangedLis
         listener.onNowPlaying();
     }
 
+    /** Whether the app lets others move its playhead (Glass edition: the player's bar). */
+    boolean canSeek() {
+        return controller != null && (actions & PlaybackState.ACTION_SEEK_TO) != 0 && duration > 0;
+    }
+
+    /** Moves the playhead to `ms`; shown at once (the app's own update follows). */
+    void seekTo(long ms) {
+        MediaController c = controller;
+        if (c == null) return;
+        try {
+            c.getTransportControls().seekTo(ms);
+            position = ms;
+            positionAt = SystemClock.elapsedRealtime();
+        } catch (RuntimeException e) {
+            AppLog.w("now playing seek: " + e.getMessage());
+        }
+    }
+
     void previous() {
         MediaController c = controller;
         if (c != null) try { c.getTransportControls().skipToPrevious(); } catch (RuntimeException ignored) {}

@@ -112,6 +112,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private int idleFrom = Z_SHELF;
     /** The floating "Continuar viendo" widget at the centre right (↑ from the shelf enters it). */
     private static final int Z_WATCH = 13;
+    /** Glass edition: the open player's progress bar (← → move the playhead). */
+    private static final int Z_PLAYER_BAR = 14;
     /** The drawer's weather card: page 0 the next hours, page 1 the next seven days. */
     private final Spring[] weatherFocus = {new Spring(0.26f, 0.85f, 0)};
     private int weatherPage;
@@ -1266,7 +1268,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         if (reorderAnim) tilesMoving |= stepReorder(dt, up);
         boolean statusMoving = step(statusFocus, dt);
         boolean heroMoving = heroFocus.step(dt);
-        boolean topMoving = step(topFocus, dt) | step(playerFocus, dt) | step(avatarFocus, dt) | step(npExpand, dt) | step(ctrlFocus, dt) | step(ctrlShow, dt) | step(npOpen, dt) | step(npFull, dt), cardsMoving = step(cardFocus, dt) | step(recentFocus, dt);
+        boolean topMoving = step(topFocus, dt) | step(playerFocus, dt) | step(avatarFocus, dt) | step(npExpand, dt) | step(ctrlFocus, dt) | step(ctrlShow, dt) | step(npOpen, dt) | step(npFull, dt) | step(barFocus, dt), cardsMoving = step(cardFocus, dt) | step(recentFocus, dt);
         if (topMoving) placeWatch();   // the island fades out while the player opens in its place
         boolean watchMoving = step(watchFocus, dt), watchFading = step(watchShow, dt) | step(watchActive, dt);
         if (watchSwap && watchShow[0].value < 0.03f) showWatch(watchWaiting);   // the old one faded: the new one comes in
@@ -2704,15 +2706,16 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         statusChanged |= aim(playerFocus, !sheetOpen && zone == Z_PLAYER ? 0 : -1, snap);
         statusChanged |= aim(avatarFocus, !sheetOpen && zone == Z_AVATAR ? 0 : -1, snap);
         statusChanged |= aim(ctrlFocus, !sheetOpen && zone == Z_PLAYER_CTRL ? ctrlIndex : -1, snap);
-        float show = !sheetOpen && !npCollapsed && (zone == Z_PLAYER || zone == Z_PLAYER_CTRL) ? 1 : 0;
+        float show = !sheetOpen && !npCollapsed && (zone == Z_PLAYER || zone == Z_PLAYER_BAR || zone == Z_PLAYER_CTRL) ? 1 : 0;
+        statusChanged |= aim(barFocus, !sheetOpen && zone == Z_PLAYER_BAR ? 0 : -1, snap);
         if (ctrlShow[0].target != show) {
             ctrlShow[0].target = show;
             statusChanged = true;
         }
-        // The capsule drops into a compact card while the focus is on it, and opens whole on its buttons.
+        // The capsule drops into the whole player while the focus is on it, its bar or its buttons.
         boolean music = nowPlaying != null && nowPlaying.visible() && !npCollapsed;
-        boolean open = !sheetOpen && music && (zone == Z_PLAYER || zone == Z_PLAYER_CTRL);
-        boolean full = open && zone == Z_PLAYER_CTRL;
+        boolean open = !sheetOpen && music && (zone == Z_PLAYER || zone == Z_PLAYER_BAR || zone == Z_PLAYER_CTRL);
+        boolean full = open;
         if (npOpen[0].target != (open ? 1 : 0) || npFull[0].target != (full ? 1 : 0)) {
             npOpen[0].target = open ? 1 : 0;
             npFull[0].target = full ? 1 : 0;
@@ -3096,8 +3099,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             retarget(false);
         } else if (zone == Z_IDLE) {
             return;
-        } else if (zone == Z_PLAYER_CTRL) {
-            zone = Z_PLAYER;   // the whole player folds back into the compact card
+        } else if (zone == Z_PLAYER_CTRL || zone == Z_PLAYER_BAR) {
+            zone = Z_PLAYER;   // from its bar or its buttons back to the player itself
             retarget(false);
         } else if (zone != Z_SHELF) {
             zone = Z_SHELF;
@@ -3335,6 +3338,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             ctrlIndex = indexOfKind(C_PLAY);
             retarget(false);
             statusDirty = heroDirty = true;
+            click.open();
+            return;
+        } else if (zone == Z_PLAYER_BAR) {
+            if (nowPlaying != null) nowPlaying.toggle();   // OK on the bar: play or pause
             click.open();
             return;
         } else if (zone == Z_PLAYER_CTRL) {
@@ -4533,7 +4540,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     private void onNowPlaying() {
         npExpand[0].target = npCollapsed ? 0 : 1;
-        if ((zone == Z_PLAYER || zone == Z_PLAYER_CTRL) && (nowPlaying == null || !nowPlaying.visible())) {
+        if ((zone == Z_PLAYER || zone == Z_PLAYER_BAR || zone == Z_PLAYER_CTRL) && (nowPlaying == null || !nowPlaying.visible())) {
             zone = Z_TOP;
             topIndex = 3;
             retarget(false);
@@ -4541,15 +4548,38 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         restartTick();
     }
 
-    // MARK: - Glass edition: the capsule drops into a card (focus on it), then opens whole (focus on its buttons)
+    // MARK: - Glass edition: the capsule drops into the player (focus on it, its bar or its buttons)
 
     /**
-     * npOpen: 0 = the capsule, 1 = dropped into a compact card (the focus is on it or on its buttons). npFull: 0 = the
-     * compact card with the capsule's row of buttons under it, 1 = the whole player, those buttons inside it and the
-     * cover fading in from the right. A light bounce as each arrives.
+     * npOpen: 0 = the capsule, 1 = dropped into the player. npFull follows it (the card's size; it once had a compact
+     * step in between): 1 = the whole player, the capsule's buttons inside it and the cover fading in from the right.
+     * A light bounce as it arrives.
      */
     private final Spring[] npOpen = {new Spring(0.28f, 0.74f, 0)}, npFull = {new Spring(0.28f, 0.76f, 0)};
     private long npHeroAt;
+    /** The bar's focus, and where ← → have moved the playhead to (-1: nowhere yet); sent once the arrows rest. */
+    private final Spring[] barFocus = {new Spring(0.3f, 0.8f, 0)};
+    private long scrubTo = -1;
+    private static final long SCRUB_STEP = 5000, SCRUB_REST = 450;
+    private final Runnable commitScrub = () -> {
+        if (scrubTo >= 0 && nowPlaying != null) nowPlaying.seekTo(scrubTo);
+        scrubTo = -1;
+        heroDirty = true;
+        wake();
+    };
+
+    private void scrub(int dx) {
+        NowPlaying np = nowPlaying;
+        if (np == null || !np.canSeek()) return;
+        long from = scrubTo >= 0 ? scrubTo : (long) (np.progress() * np.duration);
+        scrubTo = Math.max(0, Math.min(np.duration - 1000, from + dx * SCRUB_STEP));
+        handler.removeCallbacks(commitScrub);
+        handler.postDelayed(commitScrub, SCRUB_REST);
+        heroDirty = true;
+        click.move();
+        wake();
+    }
+
     private static final float NPC_W1 = 560, NPC_H1 = 160, NPC_W2 = 700, NPC_H2 = 330, NPC_PAD = 22, NPC_COVER = 108;
     /** The cover as the card's picture, and its colour on the progress (made once per song). */
     private final android.graphics.Matrix npcGlowMatrix = new android.graphics.Matrix();
@@ -4639,8 +4669,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             fill.setAlpha(255);
             scene.glass(c, npMorph, rad, 0xFFFFFFFF, 0, 0, 0, 0.02f, 0, ae);   // the glass rim over the picture
         }
-        // With the focus on the card itself (compact), a white ring around it.
-        float pf = Ui.clamp(playerFocus[0].value) * (1 - f) * ge;
+        // With the focus on the player itself (not its bar or its buttons), a white ring around it.
+        float pf = Ui.clamp(playerFocus[0].value) * ge;
         if (pf > 0.01f) {
             focusRing.setStrokeWidth(3.5f * k);
             focusRing.setColor(Ui.alpha(0xFFFFFFFF, 0.95f * pf));
@@ -4699,7 +4729,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         c.drawText(npcArtistText, 0, npcArtistText.length(), tx, T + 126 * k, npcArtist);
         // The progress: compact, a thin line under the text; whole, a thick track across the card, what played in the
         // song's colour with a soft hill of sound rolling over it while it plays, the knob, and the times under it.
-        float p = Ui.clamp(np.progress()), by = lerp(T + 146 * k, T + 176 * k, f), bh = lerp(6, 12, f) * k;
+        // While ← → move the playhead, the bar shows where it will go.
+        float p = scrubTo >= 0 && np.duration > 0 ? Ui.clamp(scrubTo / (float) np.duration) : Ui.clamp(np.progress());
+        float by = lerp(T + 146 * k, T + 176 * k, f), bh = lerp(6, 12, f) * k;
         float a0 = lerp(tx, L + pad, f), a1 = R - pad, head = a0 + (a1 - a0) * p;
         fill.setShader(null);
         fill.setColor(Ui.alpha(0x47FFFFFF, te));
@@ -4727,9 +4759,16 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             tmp.set(a0, by - bh / 2, head, by + bh / 2);
             c.drawRoundRect(tmp, bh / 2, bh / 2, fill);
         }
-        float knob = lerp(8, 15, f) * k;
+        // The knob; with the focus on the bar it grows, with a white ring (← → move it).
+        float bf = Ui.clamp(barFocus[0].value);
+        float knob = lerp(8, 15, f) * k * (1 + 0.45f * bf);
         fill.setColor(Ui.alpha(0xFFFAF6F2, te));
         c.drawCircle(head, by, knob, fill);
+        if (bf > 0.01f) {
+            focusRing.setStrokeWidth(3.5f * k);
+            focusRing.setColor(Ui.alpha(0xFFFFFFFF, 0.95f * bf * te));
+            c.drawCircle(head, by, knob + 7 * k, focusRing);
+        }
         if (f > 0.01f) {
             String done = time(np.duration * p), total = time(np.duration);
             npcTime.setColor(Ui.alpha(0xCCFFFFFF, te * f));
@@ -5183,8 +5222,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 } else if (dy > 0) {
                     if (npCollapsed) {
                         zone = cards.isEmpty() ? Z_SHELF : Z_CARDS;
+                    } else if (nowPlaying != null && nowPlaying.canSeek()) {
+                        zone = Z_PLAYER_BAR;   // down onto its progress bar, then its buttons
                     } else {
-                        zone = Z_PLAYER_CTRL;   // down into the controls under it, on play/pause
+                        zone = Z_PLAYER_CTRL;   // down into the controls, on play/pause
                         ctrlIndex = indexOfKind(C_PLAY);
                     }
                 } else if (dy < 0) {
@@ -5194,13 +5235,24 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                     return true;
                 }
                 break;
+            case Z_PLAYER_BAR:
+                if (dx != 0) {
+                    scrub(dx);   // the playhead moves; the focus stays on the bar
+                    return true;
+                } else if (dy < 0) {
+                    zone = Z_PLAYER;
+                } else {
+                    zone = Z_PLAYER_CTRL;
+                    ctrlIndex = indexOfKind(C_PLAY);
+                }
+                break;
             case Z_PLAYER_CTRL:
                 if (dx != 0) {
                     int next = Math.max(0, Math.min(ctrlKinds.length - 1, ctrlIndex + dx));
                     if (next == ctrlIndex) return true;
                     ctrlIndex = next;
                 } else if (dy < 0) {
-                    zone = Z_PLAYER;
+                    zone = nowPlaying != null && nowPlaying.canSeek() ? Z_PLAYER_BAR : Z_PLAYER;
                 } else {
                     zone = cards.isEmpty() ? Z_SHELF : Z_CARDS;
                 }
