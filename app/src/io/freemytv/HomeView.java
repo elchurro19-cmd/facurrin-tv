@@ -4008,24 +4008,40 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         if (night > 0.001f) drawImage(c, b.nightImage, alpha * night);
     }
 
-    private TextPaint smallClock, smallTemp;
+    private TextPaint smallClock, smallTemp, smallDay;
 
-    /** The clock small at the top left (with the temperature), while an app's shelf is up. */
+    /**
+     * While an app's shelf is up: a status line at the top left, level with the round buttons: the clock in the
+     * home's letter and, beside it, the day over the weather.
+     */
     private void drawSmallClock(Canvas c, float a) {
-        if (smallClock == null || smallClock.getTextSize() != 84 * k) {
-            smallClock = new TextPaint(Ui.numbers(Ui.stadium, 84 * k, 0xFFFFFFFF));
-            smallTemp = new TextPaint(Ui.text(Ui.semibold, 26 * k, 0xE6FFFFFF));
-            smallClock.setShadowLayer(14 * k, 0, 2 * k, 0x80000000);
-            smallTemp.setShadowLayer(10 * k, 0, 2 * k, 0x80000000);
+        if (smallClock == null || smallClock.getTextSize() != 64 * k) {
+            smallClock = new TextPaint(Ui.numbers(Ui.stadium, 64 * k, 0xFFFFFFFF));
+            smallTemp = new TextPaint(Ui.text(Ui.semibold, 21 * k, 0xE6FFFFFF));
+            smallDay = new TextPaint(Ui.text(Ui.semibold, 18 * k, 0xB3FFFFFF));
+            smallDay.setLetterSpacing(0.12f);
+            for (Paint p : new Paint[] {smallClock, smallTemp, smallDay}) p.setShadowLayer(12 * k, 0, 2 * k, 0x80000000);
         }
-        float x = G_LEFT * k, base = 150 * k + (1 - a) * 20 * k;
+        refreshGlassDate();
+        RectF row = topRects[3];
+        float mid = row.centerY() - (1 - a) * 12 * k, x = MARGIN * k;
+        float base = mid + Ui.cap(smallClock) / 2;
         smallClock.setAlpha(Math.round(255 * a));
         c.drawText(clockText, x - Ui.leftBearing(smallClock, clockText), base, smallClock);
+        float tx = x + smallClock.measureText(clockText) + 22 * k;
+        fill.setShader(null);
+        fill.setColor(Ui.alpha(0x59FFFFFF, a));
+        c.drawRect(tx, mid - 26 * k, tx + 2 * k, mid + 26 * k, fill);
+        tx += 20 * k;
+        smallDay.setAlpha(Math.round(179 * a));
+        String day = (gWeekday + (gDayMonth.isEmpty() ? "" : "  " + gDayMonth)).toUpperCase(Ui.locale());
         HomeData.Weather wx = data.weather;
-        if (Prefs.weather() && !Double.isNaN(wx.temp)) {
+        boolean weather = Prefs.weather() && !Double.isNaN(wx.temp);
+        c.drawText(day, tx, weather ? mid - 6 * k : mid + Ui.halfCap(smallDay), smallDay);
+        if (weather) {
             refreshGlassWeather(wx);
             smallTemp.setAlpha(Math.round(230 * a));
-            c.drawText(gTempText + "  " + gCondText, x + smallClock.measureText(clockText) + 26 * k, base, smallTemp);
+            c.drawText(gTempText + "  " + gCondText, tx, mid + 24 * k, smallTemp);
         }
     }
 
@@ -4632,16 +4648,20 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
     }
 
-    // Glass edition, option E: ↑ from an app turns the top of the screen into that app's own shelf, like Apple TV's
-    // Top Shelf: a heading and up to three big cards in a row, no box around them; the clock shrinks to the top left.
-    private static final float TS_LEFT = 80, TS_HEAD = 318, TS_TOP = 346, TS_W = 520, TS_H = 292, TS_GAP = 34;
+    // Glass edition, option E: up from an app turns the top of the screen into that app's own shelf, like Apple TV's
+    // Top Shelf: a heading and up to three cards in a row, no box around them; the focused card opens wide (16:9) and
+    // the others narrow, as it moves; the clock shrinks to the top left.
+    private static final float TS_LEFT = 80, TS_HEAD = 300, TS_TOP = 330, TS_H = 320, TS_BIG = 570, TS_SMALL = 300,
+            TS_GAP = 30;
+    private final String[] watchTitlesBig = new String[3];
+    private final android.graphics.Matrix cropMatrix = new android.graphics.Matrix();
 
     private int[] watchImageSize(WatchNext.Content c) {
         int t = Math.round(TS_H * k * 1.06f);
-        return c.variant == WatchNext.ROW_WIDE ? new int[] {Math.round(TS_W * k * 1.06f), t} : new int[] {t, t};
+        return c.variant == WatchNext.ROW_WIDE ? new int[] {Math.round(TS_BIG * k * 1.06f), t} : new int[] {t, t};
     }
 
-    /** Where everything goes, and the text cut to fit, done once per content (never while drawing). */
+    /** The text cut to fit (narrow and wide), done once per content (never while drawing). */
     private void layoutWatch() {
         WatchNext.Content c = watch;
         if (c == null) return;
@@ -4652,16 +4672,13 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             watchSub = new TextPaint(Ui.text(Ui.medium, 21 * k, 0xC7FFFFFF));
             for (Paint p : new Paint[] {watchHead, watchTitle, watchSub}) p.setShadowLayer(10 * k, 0, 2 * k, 0x80000000);
         }
-        boolean wide = c.variant == WatchNext.ROW_WIDE;
-        float cw = (wide ? TS_W : TS_H) * k, ch = TS_H * k, gap = TS_GAP * k, x0 = TS_LEFT * k, top = TS_TOP * k;
         int brand = HomeApps.brandColor(c.pkg);
         watchColor = brand != 0 ? brand : 0xFFFFFFFF;
         int n = Math.min(3, c.items.size());
-        watchCard.set(x0, TS_HEAD * k - 30 * k, x0 + n * cw + (n - 1) * gap, top + ch + 80 * k);
-        watchHeadX = x0;
+        boolean wide = c.variant == WatchNext.ROW_WIDE;
+        float small = (wide ? TS_SMALL : TS_H * 0.78f) * k, big = (wide ? TS_BIG : TS_H) * k;
+        watchHeadX = TS_LEFT * k;
         for (int i = 0; i < n; i++) {
-            float x = x0 + i * (cw + gap);
-            watchRects[i].set(x, top, x + cw, top + ch);
             WatchNext.Entry e = c.items.get(i);
             boolean seen = e.duration > 0 && e.position > 0;
             watchProgress[i] = seen ? Ui.clamp(e.position / (float) e.duration) : 0;
@@ -4670,15 +4687,55 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 long left = (e.duration - e.position) / 60_000;
                 sub = left < 1 ? "Queda menos de 1 min" : left < 60 ? "Quedan " + left + " min" : "Quedan " + (left / 60) + " h " + (left % 60) + " min";
             }
-            watchTitles[i] = TextUtils.ellipsize(e.title, watchTitle, cw, TextUtils.TruncateAt.END).toString();
-            watchSubs[i] = TextUtils.ellipsize(sub, watchSub, cw, TextUtils.TruncateAt.END).toString();
+            watchTitles[i] = TextUtils.ellipsize(e.title, watchTitle, small, TextUtils.TruncateAt.END).toString();
+            watchTitlesBig[i] = TextUtils.ellipsize(e.title, watchTitle, big, TextUtils.TruncateAt.END).toString();
+            watchSubs[i] = TextUtils.ellipsize(sub, watchSub, big, TextUtils.TruncateAt.END).toString();
         }
+        placeWatchCards();
         watchDirty = true;
+    }
+
+    /** Each card's place for the focus as it is now: the focused one wide, the others narrow (they follow the spring). */
+    private void placeWatchCards() {
+        WatchNext.Content c = watch;
+        if (c == null) return;
+        boolean wide = c.variant == WatchNext.ROW_WIDE;
+        float small = (wide ? TS_SMALL : TS_H * 0.78f) * k, big = (wide ? TS_BIG : TS_H) * k;
+        int n = Math.min(3, c.items.size());
+        // Nothing focused yet (the shelf coming up): the first card is the wide one.
+        float any = 0;
+        for (int i = 0; i < n; i++) any = Math.max(any, Ui.clamp(watchFocus[i].value));
+        float x = TS_LEFT * k, top = TS_TOP * k;
+        for (int i = 0; i < n; i++) {
+            float f = Ui.clamp(watchFocus[i].value);
+            if (i == 0) f = Math.max(f, 1 - any);
+            float cw = small + (big - small) * f, ch = wide ? TS_H * k : cw;
+            watchRects[i].set(x, top, x + cw, top + ch);
+            x += cw + TS_GAP * k;
+        }
+        watchCard.set(TS_LEFT * k, TS_HEAD * k - 30 * k, x, top + TS_H * k + 80 * k);
+    }
+
+    /** The picture centre-cropped into `r` (never stretched), with rounded corners. */
+    private void cropImage(Canvas c, Bitmap b, RectF r, float rad) {
+        BitmapShader shader = imageShaders.get(b);
+        if (shader == null) {
+            shader = new BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            imageShaders.put(b, shader);
+        }
+        float s = Math.max(r.width() / b.getWidth(), r.height() / b.getHeight());
+        cropMatrix.setScale(s, s);
+        cropMatrix.postTranslate(r.centerX() - b.getWidth() * s / 2, r.centerY() - b.getHeight() * s / 2);
+        shader.setLocalMatrix(cropMatrix);
+        imageFill.setShader(shader);
+        c.drawRoundRect(r, rad, rad, imageFill);
+        imageFill.setShader(null);
     }
 
     private void drawWatch(Canvas c) {
         WatchNext.Content wc = watch;
         if (wc == null) return;
+        placeWatchCards();
         // The heading, with a dot of the app's colour.
         float hx = watchHeadX, hb = TS_HEAD * k;
         if (watchColor != 0xFFFFFFFF) {
@@ -4691,17 +4748,19 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         boolean round = wc.variant == WatchNext.ROW_ROUND;
         for (int i = 0; i < Math.min(3, wc.items.size()); i++) {
             RectF r = watchRects[i];
-            float f = Ui.clamp(watchFocus[i].value), s = 1 + 0.06f * f;
-            cell.set(r.centerX() - r.width() * s / 2, r.centerY() - r.height() * s / 2 - 8 * k * f,
-                    r.centerX() + r.width() * s / 2, r.centerY() + r.height() * s / 2 - 8 * k * f);
-            float rad = round ? cell.width() / 2 : 18 * k * s;
+            float f = Ui.clamp(watchFocus[i].value);
+            cell.set(r);
+            cell.offset(0, -6 * k * f);
+            float rad = round ? cell.width() / 2 : 18 * k;
             tmp.set(cell);
             tmp.offset(0, (10 + 12 * f) * k);
             shadow.setColor(Ui.alpha(0xFF000000, 0.35f + 0.2f * f));
             shadows.draw(c, tmp, rad, SHADOW_BLUR * 1.4f * k, shadow);
-            drawWatchImage(c, wc.items.get(i), cell, rad, 1);
+            WatchNext.Entry e = wc.items.get(i);
+            if (e.bitmap != null) cropImage(c, e.bitmap, cell, rad);
+            else drawWatchImage(c, e, cell, rad, 1);
             if (watchProgress[i] > 0) {   // how far you got, along the picture's foot, in the app's colour
-                float in = 14 * k * s, bh = 6 * k, y = cell.bottom - in;
+                float in = 14 * k, bh = 6 * k, y = cell.bottom - in;
                 fill.setShader(null);
                 fill.setColor(0x8C000000);
                 tmp.set(cell.left + in, y - bh, cell.right - in, y);
@@ -4720,10 +4779,14 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 float o = 2 * k;
                 c.drawRoundRect(cell.left - o, cell.top - o, cell.right + o, cell.bottom + o, rad + o, rad + o, watchRim);
             }
+            // Under it: the title (whole on the wide card), and its details only on the focused one.
             float base = r.bottom + 44 * k;
-            watchTitle.setAlpha(Math.round(255 * (0.85f + 0.15f * f)));
-            c.drawText(watchTitles[i], r.left, base, watchTitle);
-            c.drawText(watchSubs[i], r.left, base + 32 * k, watchSub);
+            watchTitle.setAlpha(Math.round(255 * (0.8f + 0.2f * f)));
+            c.drawText(f > 0.5f ? watchTitlesBig[i] : watchTitles[i], r.left, base, watchTitle);
+            if (f > 0.01f) {
+                watchSub.setAlpha(Math.round(199 * f));
+                c.drawText(watchSubs[i], r.left, base + 32 * k, watchSub);
+            }
         }
     }
 
