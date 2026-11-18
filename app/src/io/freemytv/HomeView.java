@@ -181,8 +181,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private int tab, topIndex, cardIndex;
     private int widgetIndex;    // with TalkBack on, the drawer's weather (0) or football (1) card can take the focus
     private List<Recs.Pick> cards = new ArrayList<>();
-    private final Spring[] topFocus = new Spring[6];
-    private final RectF[] topRects = new RectF[6];
+    /** Glass edition: five round buttons (Buscar, Hablar, Apagar en, Wi-Fi, Ajustes) after the three tabs. */
+    private static final int TOP_N = 5, TOP_LAST = 2 + TOP_N;
+    private final Spring[] topFocus = new Spring[3 + TOP_N];
+    private final RectF[] topRects = new RectF[3 + TOP_N];
     private final Spring[] cardFocus = new Spring[3];
     private final RectF[] cardRects = new RectF[3];
     private final List<HomeApps.Item> lightButtons = new ArrayList<>();
@@ -677,7 +679,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
         setContentDescription("Free My TV");
         drawerLayer.setVisibility(INVISIBLE);
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; i < 3 + TOP_N; i++) {
             topFocus[i] = new Spring(0.26f, 0.85f, 0);
             topRects[i] = new RectF();
         }
@@ -1081,8 +1083,12 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     /** The three corner buttons, with their names in the current language. */
     private void makeLightButtons() {
         lightButtons.clear();
-        lightButtons.add(HomeApps.action(HomeApps.LIVE_TV, "live", Ui.tr("light|Live TV"), "live_tv"));
-        lightButtons.add(HomeApps.action(HomeApps.INPUTS, "inputs", Ui.tr("HDMI Inputs"), "hdmi"));
+        // Glass edition: TV en vivo and the inputs stay in the drawer only; search and voice (the Google Assistant),
+        // the sleep timer and the Wi-Fi took their place.
+        lightButtons.add(HomeApps.action(HomeApps.QUICK_SETTINGS, "search", "Buscar", "search"));
+        lightButtons.add(HomeApps.action(HomeApps.QUICK_SETTINGS, "voice", "Hablar", "mic"));
+        lightButtons.add(HomeApps.action(HomeApps.QUICK_SETTINGS, "sleep", "Apagar en\u2026", "bedtime"));
+        lightButtons.add(HomeApps.action(HomeApps.QUICK_SETTINGS, "wifi", "Wi-Fi", "wifi"));
         lightButtons.add(HomeApps.action(HomeApps.QUICK_SETTINGS, "settings", Ui.tr("light|Settings"), "settings"));
     }
 
@@ -1892,7 +1898,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         applyTone();
         Paint text = clock ? lClockMatch : lMatch;
         float fade = 1;
-        for (int i = 3; i < 6 && !clock; i++) fade = Math.min(fade, 1 - Ui.clamp(topFocus[i].value));
+        for (int i = 3; i < 3 + TOP_N && !clock; i++) fade = Math.min(fade, 1 - Ui.clamp(topFocus[i].value));
         if (fade <= 0.01f) return;
         long now = System.currentTimeMillis();
         int live = 0;
@@ -3342,6 +3348,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             }
             it = lightButtons.get(topIndex - 3);
             r = topRects[topIndex];
+            if (topButton(it.key)) return;
         } else if (zone == Z_AVATAR) {
             click.open();
             try {
@@ -3879,7 +3886,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             avatarRect.set(right - b, cy - b / 2, right, cy + b / 2);
             right -= b + L_BUTTON_GAP * k;
         }
-        for (int i = 2; i >= 0; i--) {
+        for (int i = TOP_N - 1; i >= 0; i--) {
             topRects[3 + i].set(right - b, cy - b / 2, right, cy + b / 2);
             right -= b + L_BUTTON_GAP * k;
         }
@@ -5433,12 +5440,94 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
     }
 
+    private boolean wifiOn = true;
+    private int sleepLeft;
+    private TextPaint badge;
+    private String wifiText = "Wi-Fi";
+
+    private TextPaint badgePaint() {
+        if (badge == null || badge.getTextSize() != 15 * k) {
+            badge = new TextPaint(Ui.text(Ui.semibold, 15 * k, 0xFF141414));
+            badge.setTextAlign(Paint.Align.CENTER);
+        }
+        return badge;
+    }
+
+    /** The round button's name under it, with its state (Wi-Fi connected or not, the timer's minutes). */
+    private String buttonLabel(HomeApps.Item b) {
+        switch (b.key) {
+            case "wifi": return wifiText;
+            case "sleep": return sleepLeft > 0 ? "Se apaga en " + sleepLeft + " min · OK cambia" : "Apagar en… · OK: 30 min";
+            case "voice": return "Hablar con el Asistente";
+            default: return b.label;
+        }
+    }
+
+    /** The Wi-Fi's state and the timer's minutes for their buttons (checked as the buttons are drawn; cheap). */
+    private void refreshTopState() {
+        boolean on = false, eth = false;
+        try {
+            android.net.ConnectivityManager cm = getContext().getSystemService(android.net.ConnectivityManager.class);
+            android.net.Network net = cm == null ? null : cm.getActiveNetwork();
+            android.net.NetworkCapabilities nc = net == null ? null : cm.getNetworkCapabilities(net);
+            on = nc != null && nc.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET);
+            eth = nc != null && nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET);
+        } catch (RuntimeException ignored) {
+        }
+        wifiOn = on;
+        wifiText = !on ? "Sin conexión" : eth ? "Cable conectado" : "Wi-Fi conectado";
+        sleepLeft = SleepTimer.minutesLeft(getContext());
+    }
+
+    /** OK on one of the new round buttons; false for the ones HomeApps opens (Ajustes). */
+    private boolean topButton(String key) {
+        Context ctx = getContext();
+        android.content.Intent i;
+        switch (key) {
+            case "search":   // the Google Assistant, typing
+                i = new android.content.Intent("android.search.action.GLOBAL_SEARCH").putExtra("search_type", 2);
+                break;
+            case "voice":    // the Google Assistant, listening
+                i = new android.content.Intent(android.content.Intent.ACTION_ASSIST).putExtra("search_type", 1)
+                        .putExtra("android.intent.extra.ASSIST_INPUT_HINT_KEYBOARD", false);
+                break;
+            case "wifi":
+                i = new android.content.Intent(android.provider.Settings.ACTION_WIFI_SETTINGS);
+                break;
+            case "sleep": {
+                int next = SleepTimer.next(ctx);
+                SleepTimer.set(ctx, next);
+                refreshTopState();
+                statusDirty = true;
+                showToast(next == 0 ? "Temporizador apagado" : "La tele se apaga en " + next + " min");
+                click.open();
+                wake();
+                return true;
+            }
+            default:
+                return false;
+        }
+        click.open();
+        try {
+            ctx.startActivity(i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+        } catch (RuntimeException e) {
+            try {   // no search screen: the Assistant's own
+                ctx.startActivity(new android.content.Intent(android.content.Intent.ACTION_ASSIST)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+            } catch (RuntimeException e2) {
+                AppLog.w("top button " + key + ": " + e2.getMessage());
+            }
+        }
+        return true;
+    }
+
     private void drawLightButtons(Canvas c) {
+        refreshTopState();
         drawAvatar(c);
         drawNowPlaying(c);
         drawPlayerControls(c);
         applyTone();
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < lightButtons.size(); i++) {
             RectF r = topRects[3 + i];
             float f = Ui.clamp(topFocus[3 + i].value), s = 1 + 0.1f * f, rad = r.width() / 2 * s;
             cell.set(r.centerX() - rad, r.centerY() - rad, r.centerX() + rad, r.centerY() + rad);
@@ -5453,11 +5542,22 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 fill.setColor(Ui.alpha(0xFFFFFFFF, f));
                 c.drawCircle(cell.centerX(), cell.centerY(), rad, fill);
             }
-            Symbols.draw(getContext(), c, lightButtons.get(i).symbol, cell.centerX(), cell.centerY(), 27 * k * s,
-                    blend(tone(L_INK, 0xEBFFFFFF), L_INK, f));
+            HomeApps.Item b = lightButtons.get(i);
+            String symbol = b.key.equals("wifi") ? (wifiOn ? "wifi" : "wifi_off") : b.symbol;
+            int ink = blend(tone(L_INK, 0xEBFFFFFF), L_INK, f);
+            if (b.key.equals("wifi") && !wifiOn) ink = blend(0xFFFF6961, L_INK, f);   // no connection: red
+            Symbols.draw(getContext(), c, symbol, cell.centerX(), cell.centerY(), 27 * k * s, ink);
+            if (b.key.equals("sleep") && sleepLeft > 0 && f < 0.99f) {   // the timer running: its minutes on a dot
+                String m = String.valueOf(sleepLeft);
+                fill.setShader(null);
+                fill.setColor(Ui.alpha(0xFFFFFFFF, 1 - f));
+                float bx = cell.right - 6 * k, by = cell.top + 6 * k, br = 15 * k;
+                c.drawCircle(bx, by, br, fill);
+                badgePaint().setAlpha(Math.round(255 * (1 - f)));
+                c.drawText(m, bx, by + Ui.halfCap(badgePaint()), badgePaint());
+            }
             if (f > 0.01f) {
-                String label = lightButtons.get(i).label;
-                if (i == 0) label += liveTvMatch();   // Glass edition: TV en vivo names today's game
+                String label = buttonLabel(b);
                 float half = lTip.measureText(label) / 2;
                 float x = Math.min(r.centerX(), CONTENT_R * k - half);
                 lTip.setAlpha(Math.round(255 * f));
@@ -5601,7 +5701,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             case Z_AVATAR:
                 if (dx < 0) {
                     zone = Z_TOP;
-                    topIndex = 5;
+                    topIndex = TOP_LAST;
                 } else if (dy > 0) {
                     zone = cards.isEmpty() ? Z_SHELF : Z_CARDS;
                 } else {
@@ -5609,7 +5709,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 }
                 break;
             case Z_TOP:
-                if (dx > 0 && topIndex == 5) {
+                if (dx > 0 && topIndex == TOP_LAST) {
                     if (!SHOW_AVATAR) return true;
                     zone = Z_AVATAR;
                     break;
@@ -5620,7 +5720,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                     break;
                 }
                 if (dx != 0) {
-                    int next = Math.max(picksOn() ? 0 : 3, Math.min(5, topIndex + dx));
+                    int next = Math.max(picksOn() ? 0 : 3, Math.min(TOP_LAST, topIndex + dx));
                     if (next == topIndex) return true;
                     topIndex = next;
                     if (topIndex < 3) selectTab(topIndex);   // like Apple TV tabs: focusing a tab selects it

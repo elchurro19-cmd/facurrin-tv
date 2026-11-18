@@ -208,6 +208,10 @@
                 android:resource="@xml/remote_key_service" />
         </service>
 
+        <!-- Glass edition: the home's sleep timer goes off here (main process: it reaches the TV's own ADB). -->
+        <receiver
+            android:name=".SleepTimer"
+            android:exported="false" />
         <receiver
             android:name=".HomeReceiver"
             android:exported="false">
