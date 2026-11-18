@@ -4450,7 +4450,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
      * The picture, centre-cropped to 16:9 and blurred for the full-screen background: scaled to 256×144 and given three
      * box-blur passes each way (close to a Gaussian, so no blocks or steps), then drawn filtered and dithered.
      */
-    private static Bitmap blurOf(Bitmap b) {
+    static Bitmap blurOf(Bitmap b) {
         if (b == null || b.getWidth() < 2 || b.getHeight() < 2) return null;
         try {
             Bitmap src = b.getConfig() == Bitmap.Config.HARDWARE ? b.copy(Bitmap.Config.ARGB_8888, false) : b;
@@ -5160,7 +5160,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     }
 
     /** The cover's average colour, brightened so it glows (white without a cover). */
-    private static int coverColor(Bitmap art) {
+    static int coverColor(Bitmap art) {
         if (art == null) return 0xFFFFFFFF;
         try {
             Bitmap one = Bitmap.createScaledBitmap(art.getConfig() == Bitmap.Config.HARDWARE

@@ -261,6 +261,11 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
             if (mine) consumed = -1;
             return mine;
         }
+        if (musicOn()) {   // Glass edition: the song's controls
+            if (!musicKey(e)) return false;
+            consumed = code;
+            return true;
+        }
         if (current == null || fallback || !"gallery".equals(current.pick.kind)) return false;
         switch (code) {
             case android.view.KeyEvent.KEYCODE_DPAD_UP:
@@ -794,6 +799,259 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
         drawCaptions(canvas, up);
         drawNotice(canvas, up);
         drawMenu(canvas, up);
+        drawMusicScreen(canvas);
+    }
+
+    // MARK: - Glass edition: "Ahora suena" (option P2). While music plays, the screensaver is the song: its cover big
+    // over its own colours blurred, the title, the home's progress bar, and the controls (← → move, OK presses).
+
+    private static final int MC_SHUFFLE = 0, MC_PREV = 1, MC_PLAY = 2, MC_NEXT = 3, MC_REPEAT = 4;
+    private int musicFocus = MC_PLAY, musicVersion = -1;
+    private float musicShow;
+    private Bitmap musicBlur;
+    private int musicAccent = 0xFFFFFFFF;
+    private android.text.TextPaint mTitle, mArtist, mLabel, mTime;
+    private final Paint mFill = new Paint(Paint.ANTI_ALIAS_FLAG), mBlur = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
+    private final Paint mRing = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final android.graphics.Path mPath = new android.graphics.Path();
+    private final android.graphics.RectF mRect = new android.graphics.RectF();
+    private final android.graphics.Matrix mMatrix = new android.graphics.Matrix();
+
+    private boolean musicOn() {
+        NowPlaying np = nowPlaying;
+        return np != null && np.playingVisible();
+    }
+
+    /** The song's keys: ← → between the controls, OK presses the focused one. Back (and the rest) end it as before. */
+    private boolean musicKey(android.view.KeyEvent e) {
+        int code = e.getKeyCode();
+        NowPlaying np = nowPlaying;
+        switch (code) {
+            case android.view.KeyEvent.KEYCODE_DPAD_LEFT:
+            case android.view.KeyEvent.KEYCODE_DPAD_RIGHT: {
+                int d = code == android.view.KeyEvent.KEYCODE_DPAD_RIGHT ? 1 : -1, next = musicFocus;
+                do {
+                    next += d;
+                } while (next >= 0 && next <= MC_REPEAT && !musicHas(np, next));
+                if (next >= 0 && next <= MC_REPEAT) musicFocus = next;
+                break;
+            }
+            case android.view.KeyEvent.KEYCODE_DPAD_CENTER:
+            case android.view.KeyEvent.KEYCODE_ENTER:
+            case android.view.KeyEvent.KEYCODE_NUMPAD_ENTER:
+                switch (musicFocus) {
+                    case MC_SHUFFLE: np.shuffle(); break;
+                    case MC_PREV: np.previous(); break;
+                    case MC_NEXT: np.next(); break;
+                    case MC_REPEAT: np.repeat(); break;
+                    default: np.toggle();
+                }
+                break;
+            case android.view.KeyEvent.KEYCODE_DPAD_UP:
+            case android.view.KeyEvent.KEYCODE_DPAD_DOWN:
+                break;   // nothing to move to: kept, so they don't end the screensaver
+            default:
+                return false;
+        }
+        invalidate();
+        return true;
+    }
+
+    private static boolean musicHas(NowPlaying np, int which) {
+        if (which == MC_SHUFFLE) return np != null && np.canShuffle();
+        if (which == MC_REPEAT) return np != null && np.canRepeat();
+        return true;
+    }
+
+    private void drawMusicScreen(Canvas c) {
+        boolean on = musicOn();
+        musicShow += ((on ? 1 : 0) - musicShow) * 0.15f;
+        if (Math.abs((on ? 1 : 0) - musicShow) < 0.01f) musicShow = on ? 1 : 0;
+        if (musicShow <= 0.01f) return;
+        NowPlaying np = nowPlaying;
+        if (np == null) return;
+        float a = musicShow;
+        if (np.version != musicVersion) {
+            musicVersion = np.version;
+            Bitmap big = np.artLarge != null ? np.artLarge : np.art;
+            musicBlur = HomeView.blurOf(big);
+            musicAccent = HomeView.coverColor(np.art);
+        }
+        if (mTitle == null) {
+            mTitle = new android.text.TextPaint(Ui.text(Ui.displaySemibold, 76 * k, 0xFFFFFFFF));
+            mArtist = new android.text.TextPaint(Ui.text(Ui.medium, 40 * k, 0xD9FFFFFF));
+            mLabel = new android.text.TextPaint(Ui.text(Ui.semibold, 24 * k, 0xBFFFFFFF));
+            mLabel.setLetterSpacing(0.12f);
+            mTime = new android.text.TextPaint(Ui.numbers(Ui.medium, 26 * k, 0xCCFFFFFF));
+            mRing.setStyle(Paint.Style.STROKE);
+        }
+        // The background: the cover's colours, blurred and dimmed.
+        mFill.setShader(null);
+        mFill.setColor(Ui.alpha(0xFF101012, a));
+        c.drawRect(0, 0, w, h, mFill);
+        if (musicBlur != null) {
+            mBlur.setAlpha(Math.round(255 * a));
+            mRect.set(0, 0, w, h);
+            c.drawBitmap(musicBlur, null, mRect, mBlur);
+            mFill.setColor(Ui.alpha(0xFF000000, 0.4f * a));
+            c.drawRect(0, 0, w, h, mFill);
+        }
+        // The small clock at the top left.
+        cornerDate.setAlpha(Math.round(235 * a));
+        c.drawText(clock, 120 * k, 120 * k, cornerDate);
+        cornerDate.setAlpha(235);
+        // The cover.
+        float cs = 520 * k, cl = 160 * k, ct = (h - cs) / 2 - 20 * k;
+        mRect.set(cl, ct + 24 * k, cl + cs, ct + cs + 24 * k);
+        mFill.setColor(Ui.alpha(0xFF000000, 0.35f * a));
+        c.drawRoundRect(mRect, 30 * k, 30 * k, mFill);
+        mRect.set(cl, ct, cl + cs, ct + cs);
+        Bitmap art = np.artLarge != null ? np.artLarge : np.art;
+        if (art != null) {
+            android.graphics.BitmapShader sh = new android.graphics.BitmapShader(art,
+                    android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP);
+            mMatrix.setScale(cs / art.getWidth(), cs / art.getHeight());
+            mMatrix.postTranslate(cl, ct);
+            sh.setLocalMatrix(mMatrix);
+            mFill.setShader(sh);
+            mFill.setAlpha(Math.round(255 * a));
+            c.drawRoundRect(mRect, 30 * k, 30 * k, mFill);
+            mFill.setShader(null);
+            mRing.setStrokeWidth(2 * k);   // a faint rim: a dark cover still reads against the dark
+            mRing.setColor(Ui.alpha(0x40FFFFFF, a));
+            c.drawRoundRect(mRect, 30 * k, 30 * k, mRing);
+        } else {
+            mFill.setColor(Ui.alpha(0x24FFFFFF, a));
+            c.drawRoundRect(mRect, 30 * k, 30 * k, mFill);
+        }
+        // The text.
+        float tx = cl + cs + 90 * k, tr = w - 160 * k, tw = tr - tx;
+        String app = np.pkg == null ? "" : np.pkg.contains("spotify") ? "SPOTIFY" : np.pkg.contains("youtube") ? "YOUTUBE" : "";
+        mLabel.setAlpha(Math.round(191 * a));
+        c.drawText("AHORA SUENA" + (app.isEmpty() ? "" : "  ·  " + app), tx, ct + 70 * k, mLabel);
+        mTitle.setAlpha(Math.round(255 * a));
+        c.drawText(android.text.TextUtils.ellipsize(np.title, mTitle, tw, android.text.TextUtils.TruncateAt.END).toString(),
+                tx, ct + 170 * k, mTitle);
+        mArtist.setAlpha(Math.round(217 * a));
+        c.drawText(android.text.TextUtils.ellipsize(np.artist, mArtist, tw, android.text.TextUtils.TruncateAt.END).toString(),
+                tx, ct + 230 * k, mArtist);
+        // The progress, as on the home's player: a thick track, what played in the song's colour with a hill of sound
+        // rolling over it, the knob, and the times.
+        float p = Ui.clamp(np.progress()), by = ct + 330 * k, bh = 14 * k, head = tx + tw * p;
+        mFill.setColor(Ui.alpha(0x47FFFFFF, a));
+        mRect.set(tx, by - bh / 2, tr, by + bh / 2);
+        c.drawRoundRect(mRect, bh / 2, bh / 2, mFill);
+        if (head - tx > bh) {
+            float t = SystemClock.uptimeMillis() / 1000f, span = head - tx, amp = (np.playing ? 30 : 10) * k;
+            mPath.reset();
+            mPath.moveTo(tx, by);
+            for (float x = tx; ; x += 5 * k) {
+                float xx = Math.min(x, head), u = (xx - tx) / span, hill = (float) Math.sin(Math.PI * u);
+                float roll = np.playing ? 0.6f + 0.4f * (float) Math.sin(u * 7 - t * 2.2f) : 1;
+                mPath.lineTo(xx, by - bh / 2 - amp * hill * hill * roll);
+                if (xx >= head) break;
+            }
+            mPath.lineTo(head, by);
+            mPath.close();
+            mFill.setColor(Ui.alpha(musicAccent, 0.45f * a));
+            c.drawPath(mPath, mFill);
+            mFill.setColor(Ui.alpha(musicAccent, a));
+            mRect.set(tx, by - bh / 2, head, by + bh / 2);
+            c.drawRoundRect(mRect, bh / 2, bh / 2, mFill);
+        }
+        mFill.setColor(Ui.alpha(0xFFFAF6F2, a));
+        c.drawCircle(head, by, 17 * k, mFill);
+        String done = time(np.duration * p), total = time(np.duration);
+        mTime.setAlpha(Math.round(204 * a));
+        c.drawText(done, tx, by + 52 * k, mTime);
+        c.drawText(total, tr - mTime.measureText(total), by + 52 * k, mTime);
+        // The controls: previous, play and next in a glass pill, shuffle and repeat on its sides.
+        float cy = ct + 470 * k, mid = tx + tw / 2, step = 110 * k, ph = 96 * k, pw = 2 * step + 100 * k;
+        mRect.set(mid - pw / 2, cy - ph / 2, mid + pw / 2, cy + ph / 2);
+        mFill.setColor(Ui.alpha(0x26FFFFFF, a));
+        c.drawRoundRect(mRect, ph / 2, ph / 2, mFill);
+        mRing.setStrokeWidth(2 * k);
+        mRing.setColor(Ui.alpha(0x66FFFFFF, a));
+        c.drawRoundRect(mRect, ph / 2, ph / 2, mRing);
+        for (int i = MC_SHUFFLE; i <= MC_REPEAT; i++) {
+            if (!musicHas(np, i)) continue;
+            float cx = i == MC_SHUFFLE ? mid - pw / 2 - 80 * k : i == MC_PREV ? mid - step : i == MC_NEXT ? mid + step
+                    : i == MC_REPEAT ? mid + pw / 2 + 80 * k : mid;
+            boolean f = i == musicFocus;
+            float r = (i == MC_PLAY ? 40 : 34) * k;
+            if (f) {
+                mFill.setColor(Ui.alpha(0xFFFFFFFF, a));
+                c.drawCircle(cx, cy, r, mFill);
+            }
+            boolean active = (i == MC_SHUFFLE && np.shuffleOn) || (i == MC_REPEAT && np.repeatMode != 0);
+            int ink = f ? 0xFF141414 : active ? musicAccent : 0xF2FFFFFF;
+            drawMusicGlyph(c, i == MC_PLAY ? (np.playing ? 3 : 1) : i == MC_PREV ? 0 : i == MC_NEXT ? 2 : i == MC_SHUFFLE ? 4 : 5,
+                    cx, cy, (i == MC_PLAY ? 22 : 17) * k, Ui.alpha(ink, a));
+        }
+        postInvalidateDelayed(np.playing ? 50 : 500);   // the hill rolls; paused, the times still tick
+    }
+
+    private static String time(float ms) {
+        long s = Math.max(0, Math.round(ms / 1000));
+        return (s / 60) + ":" + (s % 60 < 10 ? "0" : "") + (s % 60);
+    }
+
+    /** 0 previous, 1 play, 2 next, 3 pause, 4 shuffle, 5 repeat, centred on (x, y), `u` about half their height. */
+    private void drawMusicGlyph(Canvas c, int which, float x, float y, float u, int color) {
+        mFill.setShader(null);
+        mFill.setColor(color);
+        mPath.reset();
+        if (which == 3) {
+            mRect.set(x - u * 0.8f, y - u, x - u * 0.22f, y + u);
+            c.drawRoundRect(mRect, u * 0.15f, u * 0.15f, mFill);
+            mRect.set(x + u * 0.22f, y - u, x + u * 0.8f, y + u);
+            c.drawRoundRect(mRect, u * 0.15f, u * 0.15f, mFill);
+            return;
+        }
+        if (which == 1) {
+            mPath.moveTo(x - u * 0.7f, y - u);
+            mPath.lineTo(x + u * 0.95f, y);
+            mPath.lineTo(x - u * 0.7f, y + u);
+            mPath.close();
+            c.drawPath(mPath, mFill);
+            return;
+        }
+        if (which == 0 || which == 2) {
+            float dir = which == 0 ? -1 : 1;
+            mPath.moveTo(x - dir * u * 0.75f, y - u * 0.85f);
+            mPath.lineTo(x + dir * u * 0.55f, y);
+            mPath.lineTo(x - dir * u * 0.75f, y + u * 0.85f);
+            mPath.close();
+            c.drawPath(mPath, mFill);
+            float bx = x + dir * u * 0.62f;
+            mRect.set(Math.min(bx, bx + dir * u * 0.28f), y - u * 0.85f, Math.max(bx, bx + dir * u * 0.28f), y + u * 0.85f);
+            c.drawRoundRect(mRect, u * 0.1f, u * 0.1f, mFill);
+            return;
+        }
+        mRing.setStrokeWidth(u * 0.24f);
+        mRing.setColor(color);
+        mRing.setStrokeCap(Paint.Cap.ROUND);
+        mRing.setStrokeJoin(Paint.Join.ROUND);
+        if (which == 4) {
+            mPath.moveTo(x - u, y - u * 0.6f);
+            mPath.cubicTo(x - u * 0.2f, y - u * 0.6f, x + u * 0.1f, y + u * 0.6f, x + u, y + u * 0.6f);
+            mPath.moveTo(x - u, y + u * 0.6f);
+            mPath.cubicTo(x - u * 0.2f, y + u * 0.6f, x + u * 0.1f, y - u * 0.6f, x + u, y - u * 0.6f);
+            mPath.moveTo(x + u * 0.65f, y - u * 0.95f);
+            mPath.lineTo(x + u, y - u * 0.6f);
+            mPath.lineTo(x + u * 0.65f, y - u * 0.25f);
+            mPath.moveTo(x + u * 0.65f, y + u * 0.25f);
+            mPath.lineTo(x + u, y + u * 0.6f);
+            mPath.lineTo(x + u * 0.65f, y + u * 0.95f);
+        } else {
+            mRect.set(x - u, y - u * 0.6f, x + u, y + u * 0.6f);
+            mPath.addRoundRect(mRect, u * 0.5f, u * 0.5f, android.graphics.Path.Direction.CW);
+            mPath.moveTo(x + u * 0.05f, y - u * 0.95f);
+            mPath.lineTo(x + u * 0.4f, y - u * 0.6f);
+            mPath.lineTo(x + u * 0.05f, y - u * 0.25f);
+        }
+        c.drawPath(mPath, mRing);
+        mRing.setStrokeCap(Paint.Cap.BUTT);
     }
 
     private static float fadeIn(long elapsed, long duration) {
