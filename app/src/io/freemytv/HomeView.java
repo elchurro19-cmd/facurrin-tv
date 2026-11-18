@@ -4904,7 +4904,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         wake();
     }
 
-    private static final float NPC_W1 = 560, NPC_H1 = 160, NPC_W2 = 700, NPC_H2 = 330, NPC_PAD = 22, NPC_COVER = 108;
+    private static final float NPC_W1 = 560, NPC_H1 = 160, NPC_W2 = 560, NPC_H2 = 330, NPC_PAD = 22, NPC_COVER = 108;
     /** The cover as the card's picture, and its colour on the progress (made once per song). */
     private final android.graphics.Matrix npcGlowMatrix = new android.graphics.Matrix();
     private int npcGlowVersion = -1, npcAccent = 0xFFFFFFFF;
@@ -4925,7 +4925,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         // The card hangs from the capsule's top right corner and grows down out of it: compact with the focus on the
         // capsule, whole with the focus on its buttons (the spring overshoots a little).
         RectF cap = topRects[3];
-        float right = cap.left - 22 * k, top = cap.top;
+        // Option 1: it hangs under the round buttons, against the right edge, so the clock stays clear.
+        float right = CONTENT_R * k, top = cap.bottom + 24 * k;
         float cw = lerp(NPC_W1, NPC_W2, fo) * k, ch = lerp(NPC_H1, NPC_H2, fo) * k;
         npCard.set(right - cw, top, right, top + ch);
         npFullRect.set(right - NPC_W2 * k, top, right, top + NPC_H2 * k);
