@@ -193,6 +193,7 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
             invalidate();
         });
         nowPlaying.start();
+        darkNow = dark(getContext());
         data.refreshIfStale();
         recs.refreshIfStale();
         recs.prefetchAll();
@@ -261,6 +262,7 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
             if (mine) consumed = -1;
             return mine;
         }
+        if (darkNow && !musicOn()) return false;   // the dark screensaver: any key ends it
         if (musicOn()) {   // Glass edition: the song's controls
             if (!musicKey(e)) return false;
             consumed = code;
@@ -799,6 +801,7 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
         drawCaptions(canvas, up);
         drawNotice(canvas, up);
         drawMenu(canvas, up);
+        if (darkNow && !musicOn()) drawDark(canvas);
         drawMusicScreen(canvas);
     }
 
@@ -816,6 +819,37 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
     private final android.graphics.Path mPath = new android.graphics.Path();
     private final android.graphics.RectF mRect = new android.graphics.RectF();
     private final android.graphics.Matrix mMatrix = new android.graphics.Matrix();
+
+    // Glass edition: the dark screensaver (a switch in the quick settings panel): black, the clock faint in the middle.
+    // A file, not SharedPreferences: the panel and the screensaver may run in different processes.
+    private boolean darkNow;
+    private android.text.TextPaint darkClock;
+
+    static boolean dark(Context c) {
+        return new java.io.File(c.getFilesDir(), "dark-dream").exists();
+    }
+
+    static void setDark(Context c, boolean on) {
+        java.io.File f = new java.io.File(c.getFilesDir(), "dark-dream");
+        try {
+            if (on) //noinspection ResultOfMethodCallIgnored
+                f.createNewFile();
+            else //noinspection ResultOfMethodCallIgnored
+                f.delete();
+        } catch (java.io.IOException ignored) {
+        }
+    }
+
+    private void drawDark(Canvas c) {
+        if (darkClock == null) {
+            darkClock = new android.text.TextPaint(Ui.numbers(Ui.stadium, 300 * k, 0x80FFFFFF));
+            darkClock.setTextAlign(Paint.Align.CENTER);
+        }
+        mFill.setShader(null);
+        mFill.setColor(0xFF000000);
+        c.drawRect(0, 0, w, h, mFill);
+        c.drawText(clock, w / 2f, h / 2f + Ui.cap(darkClock) / 2, darkClock);
+    }
 
     private boolean musicOn() {
         NowPlaying np = nowPlaying;

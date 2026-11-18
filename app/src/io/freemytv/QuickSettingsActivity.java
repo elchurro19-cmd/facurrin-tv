@@ -140,6 +140,16 @@ public class QuickSettingsActivity extends Activity {
             }));
             dream.sub = "Activar ahora";
             tiles.add(dream);
+            // Glass edition: the screensaver in the dark (black, a faint clock); the song still shows when one plays.
+            final Tile dark = new Tile("Protector oscuro", "clear_night", null);
+            dark.sub = DreamView.dark(c) ? "Activado" : "Desactivado";
+            dark.stay = () -> {
+                boolean on = !DreamView.dark(c);
+                DreamView.setDark(c, on);
+                dark.sub = on ? "Activado" : "Desactivado";
+                invalidate();
+            };
+            tiles.add(dark);
             Tile picture = new Tile("Imagen y sonido", "picture", () -> open(RemoteKeys.quickSettings(c)));
             picture.sub = "Brillo y modos";
             tiles.add(picture);
