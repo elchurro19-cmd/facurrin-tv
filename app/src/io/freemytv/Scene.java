@@ -210,6 +210,8 @@ final class Scene {
 
     /** Offset (px) of the layer that will draw glass, if it was moved on screen without being redrawn. */
     void setOffset(float x, float y) {
+        offsetX = x;
+        offsetY = y;
         if (glass != null) glass.setFloatUniform("offset", x, y);
         if (liquid != null) liquid.setFloatUniform("offset", x, y);
     }
@@ -272,25 +274,63 @@ final class Scene {
         glassPaint.setAlpha(255);
     }
 
-    // Glass edition (from CleanYourTV Glass's FrostDrawable): with no shader to blur behind it (Android 12 and older),
-    // smoky glass that darkens a little towards the bottom, and a rim lit from the top left: brightest on the edges
-    // that face the light, fainter on the far side.
-    private static final int FROST_TOP = 0x75505058, FROST_BOTTOM = 0x8C34343C;
-    private final android.graphics.RectF frostRim = new android.graphics.RectF();
+    // Glass edition (from CleanYourTV Glass's FrostDrawable): with no shader (Android 12 and older), the blurred
+    // background behind the panel (the same frost image the drawer uses), under a smoky tint that is lighter at the top
+    // and deeper at the bottom (it reads as a slab with thickness), and a rim lit from the top left: brightest on the
+    // edges that face the light, fainter on the far side. Shaders are made once and placed with a matrix: no
+    // allocations per frame.
+    // Over the blurred photo, a light veil: brighter at the top, a touch of shade at the foot. Without a photo, the
+    // smoky tint carries the panel alone.
+    private static final int[] FROST_TINT = {0x47FFFFFF, 0x1FFFFFFF, 0x0A000000, 0x29000000};
+    private static final int[] FROST_SMOKE = {0x6A75757F, 0x5E4A4A54, 0x78303038, 0x8F222229};
+    private static final float[] FROST_STOPS = {0, 0.42f, 0.85f, 1};
+    private LinearGradient frostSmoke;
+    private final RectF frostRim = new RectF();
+    private final Paint frostImagePaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private final android.graphics.Matrix frostMatrix = new android.graphics.Matrix();
+    private BitmapShader frostImageShader;
+    private Bitmap frostShaderOf;
+    private LinearGradient frostTint, frostLight;
+    private float offsetX, offsetY;
 
     private void frost(Canvas c, RectF r, float radius, float body, float alpha) {
         int a = Math.round(255 * Math.min(1, alpha));
+        if (frostTint == null) {
+            frostTint = new LinearGradient(0, 0, 0, 1, FROST_TINT, FROST_STOPS, Shader.TileMode.CLAMP);
+            frostSmoke = new LinearGradient(0, 0, 0, 1, FROST_SMOKE, FROST_STOPS, Shader.TileMode.CLAMP);
+            frostLight = new LinearGradient(0, 0, 1, 1, new int[] {0xA6FFFFFF, 0x24FFFFFF, 0x4DFFFFFF},
+                    new float[] {0, 0.62f, 1}, Shader.TileMode.CLAMP);
+        }
         if (body > 0) {
-            flatFill.setShader(new android.graphics.LinearGradient(0, r.top, 0, r.bottom, FROST_TOP, FROST_BOTTOM,
-                    Shader.TileMode.CLAMP));
-            flatFill.setAlpha(Math.round(a * Math.min(1, body)));
+            int ba = Math.round(a * Math.min(1, body));
+            boolean photo = imageFrost && frostImage != null;
+            LinearGradient tint = photo ? frostTint : frostSmoke;
+            if (photo) {
+                if (frostShaderOf != frostImage) {
+                    frostShaderOf = frostImage;
+                    frostImageShader = new BitmapShader(frostImage, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+                    frostImagePaint.setShader(frostImageShader);
+                }
+                frostMatrix.setScale((float) w / Backdrop.FW, (float) h / Backdrop.FH);
+                frostMatrix.postTranslate(-offsetX, -offsetY);
+                frostImageShader.setLocalMatrix(frostMatrix);
+                frostImagePaint.setAlpha(ba);
+                c.drawRoundRect(r, radius, radius, frostImagePaint);
+            }
+            frostMatrix.setScale(1, r.height());
+            frostMatrix.postTranslate(r.left, r.top);
+            tint.setLocalMatrix(frostMatrix);
+            flatFill.setShader(tint);
+            flatFill.setAlpha(ba);
             c.drawRoundRect(r, radius, radius, flatFill);
             flatFill.setShader(null);
         }
         float sw = Math.max(1.5f, Math.min(r.width(), r.height()) * 0.012f);
         flatRim.setStrokeWidth(sw);
-        flatRim.setShader(new android.graphics.LinearGradient(r.left, r.top, r.right, r.bottom,
-                new int[] {0x99FFFFFF, 0x24FFFFFF, 0x47FFFFFF}, new float[] {0, 0.62f, 1}, Shader.TileMode.CLAMP));
+        frostMatrix.setScale(r.width(), r.height());
+        frostMatrix.postTranslate(r.left, r.top);
+        frostLight.setLocalMatrix(frostMatrix);
+        flatRim.setShader(frostLight);
         flatRim.setAlpha(a);
         frostRim.set(r.left + sw / 2, r.top + sw / 2, r.right - sw / 2, r.bottom - sw / 2);
         float rr = Math.max(0, radius - sw / 2);

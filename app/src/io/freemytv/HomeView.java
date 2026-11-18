@@ -885,10 +885,14 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             // input, a big app), it's read in a moment instead of being made again from the original.
             java.io.File cache = new java.io.File(ctx.getCacheDir(), "wallpaper.jpg");
             java.io.File cacheKey = new java.io.File(ctx.getCacheDir(), "wallpaper.key");
+            int[] frost = null;
             try {
                 if (cache.exists() && full.equals(new String(java.nio.file.Files.readAllBytes(cacheKey.toPath()), "UTF-8"))) {
                     b = android.graphics.BitmapFactory.decodeFile(cache.getPath());
-                    if (b != null) b = Backdrop.gpu(b);
+                    if (b != null) {
+                        frost = wallpaperFrost(b);
+                        b = Backdrop.gpu(b);
+                    }
                 }
             } catch (Exception ignored) {
             }
@@ -904,18 +908,22 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                     } catch (Exception e) {
                         AppLog.w("wallpaper cache: " + e.getMessage());
                     }
+                    frost = wallpaperFrost(made);
                     b = Backdrop.gpu(made);
                 }
             } catch (Exception | OutOfMemoryError e) {
                 AppLog.w("wallpaper: " + e.getMessage());
             }
             final Bitmap ready = b;
+            final int[] readyFrost = frost;
             handler.post(() -> {
                 wallpaperLoading = false;
                 if (ready == null || !kind.equals(Prefs.homeBackgroundShown(ctx))) return;
                 wallpaperBefore = wallpaper;   // a new picture fades in over the old one (not over black)
                 wallpaper = ready;
                 wallpaperKey = key;
+                wallpaperFrostPx = readyFrost;
+                if (bgTo == null && bgFadeAt == 0) neutralGlass();   // the glass now shows this picture, blurred
                 checkNight(true);   // a photo always takes the night look: white text over a darkened picture
                 // It fades in (a third of a second), rather than popping in.
                 android.animation.ValueAnimator in = android.animation.ValueAnimator.ofFloat(0, 1);
@@ -933,6 +941,26 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 in.start();
             });
         });
+    }
+
+    /** The gallery picture, blurred for the glass: Backdrop.FW × FH, made on the loader thread. */
+    private int[] wallpaperFrostPx;
+
+    private static int[] wallpaperFrost(Bitmap src) {
+        try {
+            // Down in two steps (each one filtered) to a tiny picture, then up: a wide, smooth blur for almost nothing.
+            Bitmap mid = Bitmap.createScaledBitmap(src, 240, 135, true);
+            Bitmap tiny = Bitmap.createScaledBitmap(mid, 40, 22, true);
+            Bitmap up = Bitmap.createScaledBitmap(tiny, Backdrop.FW, Backdrop.FH, true);
+            int[] px = new int[Backdrop.FW * Backdrop.FH];
+            up.getPixels(px, 0, Backdrop.FW, 0, 0, Backdrop.FW, Backdrop.FH);
+            mid.recycle();
+            tiny.recycle();
+            up.recycle();
+            return px;
+        } catch (RuntimeException | OutOfMemoryError e) {
+            return null;
+        }
     }
 
     /** Darkened a little all over, more on the left (the clock) and at the bottom (the shelf): the text stays readable. */
@@ -1461,12 +1489,15 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         return glassNight;
     }
 
-    /** No photo: the glass reads the background's own gray (not Scene's default aurora, which isn't on screen). */
+    /**
+     * No recommendation's photo: the glass reads the background's own gray (not Scene's default aurora, which isn't on
+     * screen) or, with a gallery picture as the background, that picture blurred (Glass edition).
+     */
     private void neutralGlass() {
         int color = blend(0xFFEBEBF0, 0xFF141416, night);
         java.util.Arrays.fill(neutralFrostPx, color);
         java.util.Arrays.fill(neutralGlassPx, color);
-        scene.setFrost(neutralFrostPx);
+        scene.setFrost(wallpaper != null && wallpaperFrostPx != null ? wallpaperFrostPx : neutralFrostPx);
         scene.setGlassImage(neutralGlassPx);
         nightPair = false;
     }
@@ -1474,11 +1505,15 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     /** What the frosted glass shows (drawer, toasts): the blurred photo, darkened at night. */
     private int[] frostOf(Backdrop b) {
         if (b.nightFrost == null || night <= 0.001f) return b.frost;
-        if (night >= 0.999f) return b.nightFrost;
-        if (b != bgTo) return night < 0.5f ? b.frost : b.nightFrost;
-        for (int i = 0; i < frostNight.length; i++) frostNight[i] = mix(b.frost[i], b.nightFrost[i], night);
+        if (b != bgTo) return b.frost;
+        // Glass edition: the panels show this frost, so at night it only goes part of the way to the darkened version
+        // (all the way, the shelf and the buttons turned almost black).
+        float e = night * NIGHT_FROST;
+        for (int i = 0; i < frostNight.length; i++) frostNight[i] = mix(b.frost[i], b.nightFrost[i], e);
         return frostNight;
     }
+
+    private static final float NIGHT_FROST = 0.4f;
 
     // MARK: - Night look
 
@@ -4471,9 +4506,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             boolean eq = nowPlaying != null && nowPlaying.playing && nowPlaying.visible();
             if (nowPlaying != null) {
                 statusDirty = true;
-                // The open player's progress moves once a second (its layer is big: not twelve times).
+                // The open player: its wave travels with the equalizer while it plays; paused, only the progress
+                // moves, once a second.
                 long now = SystemClock.uptimeMillis();
-                if (npOpened && now - npHeroAt >= 1000) {
+                if (npOpened && (eq || now - npHeroAt >= 1000)) {
                     npHeroAt = now;
                     heroDirty = true;
                 }
@@ -4504,12 +4540,12 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private final Spring[] npOpen = {new Spring(0.28f, 0.74f, 0)};
     private boolean npOpened;
     private long npHeroAt;
-    private static final float NPC_W = 1074, NPC_H = 330, NPC_TOP = 288, NPC_PAD = 36, NPC_COVER = 234;
-    /** The waveform's shape (static: measuring the sound cost the TV too much), 0 to 1 per bar. */
-    private static final float[] WAVE = {0.16f, 0.28f, 0.4f, 0.25f, 0.5f, 0.66f, 0.44f, 0.33f, 0.56f, 0.78f, 0.6f, 0.42f,
-            0.72f, 0.9f, 0.66f, 0.5f, 0.84f, 0.95f, 0.72f, 0.56f, 0.4f, 0.6f, 0.84f, 1f, 0.78f, 0.56f, 0.44f, 0.66f, 0.9f,
-            0.72f, 0.5f, 0.33f, 0.56f, 0.78f, 0.95f, 0.84f, 0.6f, 0.44f, 0.66f, 0.84f, 0.72f, 0.5f, 0.4f, 0.6f, 0.78f,
-            0.56f, 0.4f, 0.28f, 0.5f, 0.66f, 0.84f, 0.6f, 0.44f, 0.33f, 0.56f, 0.72f, 0.5f, 0.33f, 0.22f, 0.16f};
+    private static final float NPC_W = 1074, NPC_H = 384, NPC_TOP = 272, NPC_PAD = 36, NPC_COVER = 220;
+    /** The cover's own colour, glowing inside the glass behind it (made once per song: a 1×1 scale of the cover). */
+    private final Paint npcGlowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final android.graphics.Matrix npcGlowMatrix = new android.graphics.Matrix();
+    private int npcGlowVersion = -1;
+    private Paint waveStroke;
     private final RectF npCard = new RectF(), npMorph = new RectF();
     private TextPaint npcLabel, npcTitle, npcArtist, npcTime;
     private int npcVersion = -1;
@@ -4527,14 +4563,41 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         npMorph.set(lerp(from.left, npCard.left, e), lerp(from.top, npCard.top, e), lerp(from.right, npCard.right, e),
                 lerp(from.bottom, npCard.bottom, e));
         float rad = lerp(from.height() / 2, 40 * k, Ui.clamp(e));
-        drawerGlass(c, npMorph, rad, 0.72f, 0x1A000000, 10 * k, Ui.clamp(e * 3));
+        float ge = Ui.clamp(e * 3);
+        // Body: a deep, soft shadow under the slab and a tighter one at its foot, so it floats above the photo.
+        tmp.set(npMorph);
+        tmp.inset(14 * k, 0);
+        tmp.offset(0, 30 * k);
+        shadow.setColor(Ui.alpha(0xFF000000, 0.5f * ge));
+        shadows.draw(c, tmp, rad, SHADOW_BLUR * 2.2f * k, shadow);
+        tmp.set(npMorph);
+        tmp.offset(0, 8 * k);
+        shadow.setColor(Ui.alpha(0xFF000000, 0.3f * ge));
+        shadows.draw(c, tmp, rad, SHADOW_BLUR * 0.8f * k, shadow);
+        drawerGlass(c, npMorph, rad, 0.72f, 0x1A000000, 10 * k, ge);
+        float pad = NPC_PAD * k, cs = NPC_COVER * k, L = npCard.left, T = npCard.top;
+        // The cover's colour, glowing in the glass behind it.
+        if (np.version != npcGlowVersion) {
+            npcGlowVersion = np.version;
+            npcGlowPaint.setShader(new android.graphics.RadialGradient(0, 0, 1,
+                    new int[] {Ui.alpha(coverColor(np.art), 0.55f), Ui.alpha(coverColor(np.art), 0.18f), 0},
+                    new float[] {0, 0.5f, 1}, Shader.TileMode.CLAMP));
+        }
+        npcGlowMatrix.setScale(cs * 2.1f, cs * 1.6f);
+        npcGlowMatrix.postTranslate(L + pad + cs / 2, T + pad + cs / 2);
+        npcGlowPaint.getShader().setLocalMatrix(npcGlowMatrix);
+        npcGlowPaint.setAlpha(Math.round(255 * Ui.clamp(e * 1.6f - 0.4f)));
+        c.drawRoundRect(npMorph, rad, rad, npcGlowPaint);
         float te = Ui.clamp((e - 0.55f) / 0.45f);   // the content fades in once it's mostly open
         if (te <= 0.01f) return;
         c.save();
         c.clipRect(npMorph);
-        float pad = NPC_PAD * k, cs = NPC_COVER * k, L = npCard.left, T = npCard.top;
-        // The cover.
+        // The cover, lifted off the glass by its own shadow.
         cell.set(L + pad, T + pad, L + pad + cs, T + pad + cs);
+        tmp.set(cell);
+        tmp.offset(0, 14 * k);
+        shadow.setColor(Ui.alpha(0xFF000000, 0.55f * te));
+        shadows.draw(c, tmp, 22 * k, SHADOW_BLUR * 1.2f * k, shadow);
         int alpha = Math.round(255 * te);
         if (np.art != null) {
             bitmapPaint.setAlpha(alpha);
@@ -4568,12 +4631,13 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         npcLabel.setColor(Ui.alpha(0xB3FFFFFF, te));
         c.drawText(npcLabelText, tx, T + pad + Ui.cap(npcLabel), npcLabel);
         npcTitle.setColor(Ui.alpha(0xFFFFFFFF, te));
-        c.drawText(npcTitleText, 0, npcTitleText.length(), tx, T + 128 * k, npcTitle);
+        c.drawText(npcTitleText, 0, npcTitleText.length(), tx, T + 120 * k, npcTitle);
         npcArtist.setColor(Ui.alpha(0xD9FFFFFF, te));
-        c.drawText(npcArtistText, 0, npcArtistText.length(), tx, T + 174 * k, npcArtist);
-        // The controls, in a row under the artist: glass circles, the focused one white; play/pause bigger.
+        c.drawText(npcArtistText, 0, npcArtistText.length(), tx, T + 164 * k, npcArtist);
+        // The controls, in a row under the artist, their foot level with the cover's: glass circles, the focused one
+        // white; play/pause bigger.
         updateCtrlKinds(np);
-        float cy = T + 236 * k, x = tx;
+        float cy = T + (NPC_PAD + NPC_COVER - 38) * k, x = tx;
         for (int i = 0; i < ctrlKinds.length; i++) {
             int kind = ctrlKinds[i];
             float f = Ui.clamp(ctrlFocus[i].value), dia = (kind == C_PLAY ? 76 : 62) * k * (1 + 0.08f * f), r = dia / 2;
@@ -4596,23 +4660,63 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             x += dia + 18 * k;
         }
         // The progress as a waveform across the foot: what played white (its last bar glowing), the rest faint.
-        float p = np.progress(), by = npCard.bottom - 34 * k;
+        float p = np.progress(), by = npCard.bottom - 52 * k;
         String done = time(np.duration * p), left = "-" + time(np.duration * (1 - p));
         npcTime.setColor(Ui.alpha(0xE6FFFFFF, te));
         float lw = npcTime.measureText(done), rw = npcTime.measureText(left);
         float wl = L + pad, wr = npCard.right - pad;
         c.drawText(done, wl, by + Ui.halfCap(npcTime), npcTime);
         c.drawText(left, wr - rw, by + Ui.halfCap(npcTime), npcTime);
-        float a0 = wl + lw + 22 * k, a1 = wr - rw - 22 * k, bw = 6 * k;
-        float step = (a1 - a0 - bw) / (WAVE.length - 1);
-        int played = Math.round(p * WAVE.length);
-        for (int i = 0; i < WAVE.length; i++) {
-            float bh = (6 + 34 * WAVE[i]) * k, bx = a0 + i * step;
-            fill.setColor(Ui.alpha(i < played ? 0xFFFFFFFF : 0x47FFFFFF, te));
-            tmp.set(bx, by - bh / 2, bx + bw, by + bh / 2);
-            c.drawRoundRect(tmp, bw / 2, bw / 2, fill);
+        // Android's wavy progress (media controls, Android 13 and later): what played is a wave that travels while the
+        // song plays and lies flat when paused, then a gap, a pill for the playhead, a gap, and the faint flat track.
+        float a0 = wl + lw + 24 * k, a1 = wr - rw - 24 * k, stroke = 7 * k, gap = 9 * k;
+        float head = a0 + (a1 - a0) * Ui.clamp(p);
+        if (waveStroke == null) {
+            waveStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+            waveStroke.setStyle(Paint.Style.STROKE);
+            waveStroke.setStrokeCap(Paint.Cap.ROUND);
+            waveStroke.setStrokeJoin(Paint.Join.ROUND);
         }
+        waveStroke.setStrokeWidth(stroke);
+        float waveEnd = head - gap - stroke / 2;
+        if (waveEnd > a0) {
+            float amp = np.playing ? 6 * k : 0, len = 44 * k;
+            float shift = np.playing ? (SystemClock.uptimeMillis() % 1400) / 1400f * len : 0;
+            glyphPath.reset();
+            for (float wx = a0; ; wx += 3 * k) {
+                float xx = Math.min(wx, waveEnd);
+                float y = by - amp * (float) Math.sin((xx - a0 - shift) / len * 2 * Math.PI);
+                if (wx == a0) glyphPath.moveTo(xx, y); else glyphPath.lineTo(xx, y);
+                if (xx >= waveEnd) break;
+            }
+            waveStroke.setColor(Ui.alpha(0xFFFFFFFF, te));
+            c.drawPath(glyphPath, waveStroke);
+        }
+        float trackStart = head + gap + stroke / 2;
+        if (trackStart < a1) {
+            waveStroke.setColor(Ui.alpha(0x4DFFFFFF, te));
+            c.drawLine(trackStart, by, a1, by, waveStroke);
+        }
+        tmp.set(head - stroke / 2, by - 19 * k, head + stroke / 2, by + 19 * k);
+        fill.setColor(Ui.alpha(0xFFFFFFFF, te));
+        c.drawRoundRect(tmp, stroke / 2, stroke / 2, fill);
         c.restore();
+    }
+
+    /** The cover's average colour, brightened so it glows (white without a cover). */
+    private static int coverColor(Bitmap art) {
+        if (art == null) return 0xFFFFFFFF;
+        try {
+            Bitmap one = Bitmap.createScaledBitmap(art.getConfig() == Bitmap.Config.HARDWARE
+                    ? art.copy(Bitmap.Config.ARGB_8888, false) : art, 1, 1, true);
+            float[] hsv = new float[3];
+            android.graphics.Color.colorToHSV(one.getPixel(0, 0), hsv);
+            hsv[1] = Math.max(hsv[1], 0.45f);
+            hsv[2] = Math.max(hsv[2], 0.8f);
+            return android.graphics.Color.HSVToColor(hsv);
+        } catch (RuntimeException e) {
+            return 0xFFFFFFFF;
+        }
     }
 
     private static float lerp(float a, float b, float t) {
