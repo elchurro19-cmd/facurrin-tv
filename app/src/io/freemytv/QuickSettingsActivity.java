@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Canvas;
+import android.graphics.Bitmap;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
@@ -102,7 +103,7 @@ public class QuickSettingsActivity extends Activity {
         PanelView(Context c) {
             super(c);
             k = c.getResources().getDisplayMetrics().heightPixels / 1080f;
-            clock = new TextPaint(Ui.text(Ui.light, 76 * k, 0xFFFFFFFF));
+            clock = new TextPaint(Ui.text(Ui.stadium, 84 * k, 0xFFFFFFFF));   // the home clock's "Estadio" letter
             date = new TextPaint(Ui.text(Ui.regular, 24 * k, 0xB3FFFFFF));
             title = new TextPaint(Ui.text(Ui.medium, 24 * k, 0xFFFFFFFF));
             sub = new TextPaint(Ui.text(Ui.regular, 19 * k, 0x99FFFFFF));
@@ -112,6 +113,7 @@ public class QuickSettingsActivity extends Activity {
             glyph.setStrokeCap(Paint.Cap.ROUND);
             glyph.setStrokeJoin(Paint.Join.ROUND);
             buildTiles();
+            loadGlass(c);
             ValueAnimator in = ValueAnimator.ofFloat(0, 1);
             in.setDuration(280);
             in.setInterpolator(new DecelerateInterpolator(2f));
@@ -351,10 +353,7 @@ public class QuickSettingsActivity extends Activity {
             fill.setShader(null);
             float x0 = w - pw * slide;
             panelRect.set(x0, 0, x0 + pw + 60 * k, h);
-            fill.setColor(0xF01B1B1E);
-            c.drawRoundRect(panelRect, 44 * k, 44 * k, fill);
-            rim.setColor(0x0FFFFFFF);   // a faint edge: the panel stands apart without a bright outline
-            c.drawRoundRect(panelRect, 44 * k, 44 * k, rim);
+            glassPanel(c, panelRect, 44 * k, w, h);
             float x = x0 + 48 * k, right = x0 + pw - 48 * k;
             long now = System.currentTimeMillis();
             c.drawText(new SimpleDateFormat("HH:mm", Locale.US).format(new Date(now)), x, 140 * k, clock);   // as the home clock
@@ -381,7 +380,7 @@ public class QuickSettingsActivity extends Activity {
             }
             HomeData.Weather wx = weather;
             if (wx == null || Double.isNaN(wx.temp) || wx.code < 0) return;
-            if (temp == null) temp = new TextPaint(Ui.text(Ui.light, 52 * k, 0xFFFFFFFF));
+            if (temp == null) temp = new TextPaint(Ui.text(Ui.stadium, 56 * k, 0xFFFFFFFF));
             temp.setTextAlign(Paint.Align.RIGHT);
             String t = HomeData.degrees(wx.temp);
             c.drawText(t, right, 132 * k, temp);
@@ -417,16 +416,89 @@ public class QuickSettingsActivity extends Activity {
             return top + rows * th + (rows - 1) * gap;
         }
 
-        /** A tile: smoked glass with a faint rim; focused, white (the tvOS focus), slightly larger. */
+        /** A tile: a pane of glass, lighter at the top, with a lit rim; focused, white (the tvOS focus), slightly larger. */
         private void box(Canvas c, RectF rr, float rad, boolean on) {
             if (on) rr.inset(-6 * k, -4 * k);
             fill.setShader(null);
-            fill.setColor(on ? 0xFFF5F5F7 : 0x1AFFFFFF);
-            c.drawRoundRect(rr, rad, rad, fill);
-            if (!on) {
-                rim.setColor(0x1FFFFFFF);
-                c.drawRoundRect(rr, rad, rad, rim);
+            if (on) {
+                fill.setColor(0xFFF5F5F7);
+                c.drawRoundRect(rr, rad, rad, fill);
+                return;
             }
+            place(tileTint, rr, false);
+            fill.setShader(tileTint);
+            c.drawRoundRect(rr, rad, rad, fill);
+            fill.setShader(null);
+            litRim(c, rr, rad, 1.5f * k);
+        }
+
+        // MARK: Glass edition: the panel is frosted glass over the home screen's picture, like the home's panels.
+
+        /** The home screen's picture (its cached copy), blurred: Backdrop.FW × FH, made off the UI thread. */
+        private Bitmap blur;
+        private final Paint blurPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        private final android.graphics.Matrix glassMatrix = new android.graphics.Matrix();
+        private final LinearGradient panelVeil = new LinearGradient(0, 0, 0, 1,
+                new int[] {0x2EFFFFFF, 0x26000000, 0x59000000}, new float[] {0, 0.35f, 1}, Shader.TileMode.CLAMP);
+        private final LinearGradient panelSmoke = new LinearGradient(0, 0, 0, 1, 0xE0303036, 0xF01C1C20, Shader.TileMode.CLAMP);
+        private final LinearGradient tileTint = new LinearGradient(0, 0, 0, 1, 0x38FFFFFF, 0x12FFFFFF, Shader.TileMode.CLAMP);
+        private final LinearGradient rimLight = new LinearGradient(0, 0, 1, 1, new int[] {0xA6FFFFFF, 0x24FFFFFF, 0x4DFFFFFF},
+                new float[] {0, 0.62f, 1}, Shader.TileMode.CLAMP);
+        private final RectF rimRect = new RectF();
+
+        private void loadGlass(Context c) {
+            if (!HomeActivity.shown || !Gallery.photos(Prefs.homeBackgroundShown(c))) return;
+            final java.io.File f = new java.io.File(c.getCacheDir(), "wallpaper.jpg");
+            new Thread(() -> {
+                try {
+                    android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+                    o.inSampleSize = 8;
+                    Bitmap mid = android.graphics.BitmapFactory.decodeFile(f.getPath(), o);
+                    if (mid == null) return;
+                    Bitmap tiny = Bitmap.createScaledBitmap(mid, 40, 22, true);
+                    Bitmap up = Bitmap.createScaledBitmap(tiny, Backdrop.FW, Backdrop.FH, true);
+                    mid.recycle();
+                    tiny.recycle();
+                    post(() -> {
+                        blur = up;
+                        blurPaint.setShader(new android.graphics.BitmapShader(up, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
+                        invalidate();
+                    });
+                } catch (RuntimeException | OutOfMemoryError e) {
+                    AppLog.w("quick settings glass: " + e.getMessage());
+                }
+            }).start();
+        }
+
+        private void glassPanel(Canvas c, RectF r, float rad, float w, float h) {
+            if (blur != null) {
+                glassMatrix.setScale(w / Backdrop.FW, h / Backdrop.FH);
+                blurPaint.getShader().setLocalMatrix(glassMatrix);
+                c.drawRoundRect(r, rad, rad, blurPaint);
+            }
+            LinearGradient tint = blur != null ? panelVeil : panelSmoke;
+            place(tint, r, false);
+            fill.setShader(tint);
+            c.drawRoundRect(r, rad, rad, fill);
+            fill.setShader(null);
+            litRim(c, r, rad, 2 * k);
+        }
+
+        /** A unit gradient stretched over `r` (diagonal: corner to corner). */
+        private void place(LinearGradient g, RectF r, boolean diagonal) {
+            glassMatrix.setScale(diagonal ? r.width() : 1, r.height());
+            glassMatrix.postTranslate(r.left, r.top);
+            g.setLocalMatrix(glassMatrix);
+        }
+
+        /** The rim lit from the top left: brightest on the edges that face the light. */
+        private void litRim(Canvas c, RectF r, float rad, float sw) {
+            place(rimLight, r, true);
+            rim.setShader(rimLight);
+            rim.setStrokeWidth(sw);
+            rimRect.set(r.left + sw / 2, r.top + sw / 2, r.right - sw / 2, r.bottom - sw / 2);
+            c.drawRoundRect(rimRect, rad - sw / 2, rad - sw / 2, rim);
+            rim.setShader(null);
         }
 
         private String fit(String s, TextPaint p, float w) {

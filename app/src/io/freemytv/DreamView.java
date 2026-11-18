@@ -482,7 +482,8 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
         // Without photos (the clock over the aurora).
         datePaint = Ui.text(Ui.semibold, 36 * k, 0xD9FFFFFF);
         datePaint.setTextAlign(Paint.Align.CENTER);
-        clockPaint = Ui.numbers(Ui.thin, 280 * k, 0xF2FFFFFF);
+        // Glass edition: the clocks in the home screen's "Estadio" letter (Anton).
+        clockPaint = Ui.numbers(Ui.stadium, 300 * k, 0xF2FFFFFF);
         clockPaint.setTextAlign(Paint.Align.CENTER);
         clockPaint.setLetterSpacing(-0.01f);
         weatherPaint = Ui.numbers(Ui.medium, 30 * k, 0xC7FFFFFF);
@@ -491,7 +492,7 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
         // With photos: the corner (date, clock, the game) and the caption.
         cornerDate = Ui.numbers(Ui.semibold, 30 * k, 0xEBFFFFFF);
         cornerQuote = Ui.numbers(Ui.regular, 23 * k, 0xC7FFFFFF);
-        cornerClock = Ui.numbers(Ui.displaySemibold, CLOCK_SIZE * k, 0xF2FFFFFF);
+        cornerClock = Ui.numbers(Ui.stadium, CLOCK_SIZE * 1.15f * k, 0xF2FFFFFF);
         labelPaint = Ui.text(Ui.medium, 25 * k, 0xB8FFFFFF);
         labelPaint.setLetterSpacing(0.1f);
         titlePaint = new TextPaint(Ui.text(Ui.displayMedium, 76 * k, 0xFFFFFFFF));
@@ -1155,9 +1156,9 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
      * close). The picture's credit is bottom left (drawGalleryCaption).
      */
     private void drawAmbientCorner(Canvas c) {
-        if (ambientClock == null || ambientClock.getTextSize() != 68 * k) {
-            ambientClock = new TextPaint(Ui.numbers(Ui.light, 68 * k, 0xF2FFFFFF));
-            ambientTemp = new TextPaint(Ui.numbers(Ui.regular, 40 * k, 0xE6FFFFFF));
+        if (ambientClock == null || ambientClock.getTextSize() != 84 * k) {
+            ambientClock = new TextPaint(Ui.numbers(Ui.stadium, 84 * k, 0xF2FFFFFF));
+            ambientTemp = new TextPaint(Ui.numbers(Ui.stadium, 46 * k, 0xE6FFFFFF));
             ambientDate = new TextPaint(Ui.text(Ui.regular, 21 * k, 0xB3FFFFFF));
             for (Paint p : new Paint[] {ambientClock, ambientTemp, ambientDate}) {
                 p.setShadowLayer(16 * k, 0, 2 * k, 0x80000000);
