@@ -1266,7 +1266,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         if (reorderAnim) tilesMoving |= stepReorder(dt, up);
         boolean statusMoving = step(statusFocus, dt);
         boolean heroMoving = heroFocus.step(dt);
-        boolean topMoving = step(topFocus, dt) | step(playerFocus, dt) | step(avatarFocus, dt) | step(npExpand, dt) | step(ctrlFocus, dt) | step(ctrlShow, dt) | step(npOpen, dt), cardsMoving = step(cardFocus, dt) | step(recentFocus, dt);
+        boolean topMoving = step(topFocus, dt) | step(playerFocus, dt) | step(avatarFocus, dt) | step(npExpand, dt) | step(ctrlFocus, dt) | step(ctrlShow, dt) | step(npOpen, dt) | step(npFull, dt), cardsMoving = step(cardFocus, dt) | step(recentFocus, dt);
         if (topMoving) placeWatch();   // the island fades out while the player opens in its place
         boolean watchMoving = step(watchFocus, dt), watchFading = step(watchShow, dt) | step(watchActive, dt);
         if (watchSwap && watchShow[0].value < 0.03f) showWatch(watchWaiting);   // the old one faded: the new one comes in
@@ -2709,11 +2709,13 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             ctrlShow[0].target = show;
             statusChanged = true;
         }
-        // The open player stays open only while the focus is on its controls.
-        boolean open = !sheetOpen && npOpened && zone == Z_PLAYER_CTRL;
-        if (!open) npOpened = false;
-        if (npOpen[0].target != (open ? 1 : 0)) {
+        // The capsule drops into a compact card while the focus is on it, and opens whole on its buttons.
+        boolean music = nowPlaying != null && nowPlaying.visible() && !npCollapsed;
+        boolean open = !sheetOpen && music && (zone == Z_PLAYER || zone == Z_PLAYER_CTRL);
+        boolean full = open && zone == Z_PLAYER_CTRL;
+        if (npOpen[0].target != (open ? 1 : 0) || npFull[0].target != (full ? 1 : 0)) {
             npOpen[0].target = open ? 1 : 0;
+            npFull[0].target = full ? 1 : 0;
             statusChanged = heroChanged = true;
         }
         statusChanged |= topChanged;
@@ -3094,8 +3096,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             retarget(false);
         } else if (zone == Z_IDLE) {
             return;
-        } else if (npOpened && zone == Z_PLAYER_CTRL) {
-            zone = Z_PLAYER;   // the open player closes back into its capsule
+        } else if (zone == Z_PLAYER_CTRL) {
+            zone = Z_PLAYER;   // the whole player folds back into the compact card
             retarget(false);
         } else if (zone != Z_SHELF) {
             zone = Z_SHELF;
@@ -3326,10 +3328,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             }
             return;
         } else if (zone == Z_PLAYER) {
-            // Glass edition: OK opens the player beside the clock, with its controls (play/pause focused).
+            // Glass edition: OK opens the whole player, on its play/pause (as moving down to its buttons does).
             npCollapsed = false;
             npExpand[0].target = 1;
-            npOpened = true;
             zone = Z_PLAYER_CTRL;
             ctrlIndex = indexOfKind(C_PLAY);
             retarget(false);
@@ -4515,7 +4516,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 // The open player: its wave travels with the equalizer while it plays; paused, only the progress
                 // moves, once a second.
                 long now = SystemClock.uptimeMillis();
-                if (npOpened && (eq || now - npHeroAt >= 1000)) {
+                if (npOpen[0].value > 0.01f && (eq || now - npHeroAt >= 1000)) {
                     npHeroAt = now;
                     heroDirty = true;
                 }
@@ -4540,66 +4541,71 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         restartTick();
     }
 
-    // MARK: - Glass edition: the player that opens beside the clock (OK on the capsule)
+    // MARK: - Glass edition: the capsule drops into a card (focus on it), then opens whole (focus on its buttons)
 
-    /** 0 = closed (the capsule at the top right), 1 = the player beside the clock; a light bounce as it arrives. */
-    private final Spring[] npOpen = {new Spring(0.28f, 0.74f, 0)};
-    private boolean npOpened;
+    /**
+     * npOpen: 0 = the capsule, 1 = dropped into a compact card (the focus is on it or on its buttons). npFull: 0 = the
+     * compact card with the capsule's row of buttons under it, 1 = the whole player, those buttons inside it and the
+     * cover fading in from the right. A light bounce as each arrives.
+     */
+    private final Spring[] npOpen = {new Spring(0.28f, 0.74f, 0)}, npFull = {new Spring(0.28f, 0.76f, 0)};
     private long npHeroAt;
-    private static final float NPC_W = 860, NPC_H = 404, NPC_PAD = 40;
+    private static final float NPC_W1 = 560, NPC_H1 = 160, NPC_W2 = 700, NPC_H2 = 330, NPC_PAD = 22, NPC_COVER = 108;
     /** The cover as the card's picture, and its colour on the progress (made once per song). */
     private final android.graphics.Matrix npcGlowMatrix = new android.graphics.Matrix();
     private int npcGlowVersion = -1, npcAccent = 0xFFFFFFFF;
     private float npcArtAt = Float.NaN;
     private final Paint npcArtPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private android.graphics.LinearGradient npcScrim, npcFoot;
-    private final RectF npCard = new RectF(), npMorph = new RectF();
+    private final RectF npCard = new RectF(), npMorph = new RectF(), npFullRect = new RectF();
     private TextPaint npcLabel, npcTitle, npcArtist, npcTime;
     private int npcVersion = -1;
+    private boolean npcWide;
     private CharSequence npcTitleText = "", npcArtistText = "";
     private String npcLabelText = "";
 
     private void drawNpCard(Canvas c) {
-        float e = npOpen[0].value;
+        float e = npOpen[0].value, f = Ui.clamp(npFull[0].value), fo = npFull[0].value;
         NowPlaying np = nowPlaying;
         if (e <= 0.01f || np == null || !np.visible()) return;
-        // It drops down out of the capsule: the card hangs from the capsule's top right corner (the capsule's own
-        // controls move inside it), and grows from the capsule's place and size (the spring overshoots a little).
+        // The card hangs from the capsule's top right corner and grows down out of it: compact with the focus on the
+        // capsule, whole with the focus on its buttons (the spring overshoots a little).
         RectF cap = topRects[3];
         float right = cap.left - 22 * k, top = cap.top;
-        npCard.set(right - NPC_W * k, top, right, top + NPC_H * k);
+        float cw = lerp(NPC_W1, NPC_W2, fo) * k, ch = lerp(NPC_H1, NPC_H2, fo) * k;
+        npCard.set(right - cw, top, right, top + ch);
+        npFullRect.set(right - NPC_W2 * k, top, right, top + NPC_H2 * k);
         RectF from = npRect.isEmpty() ? npCard : npRect;
         npMorph.set(lerp(from.left, npCard.left, e), lerp(from.top, npCard.top, e), lerp(from.right, npCard.right, e),
                 lerp(from.bottom, npCard.bottom, e));
-        float rad = lerp(from.height() / 2, 40 * k, Ui.clamp(e));
+        float rad = lerp(from.height() / 2, 30 * k, Ui.clamp(e));
         float ge = Ui.clamp(e * 3);
-        // Body: a deep, soft shadow under the slab and a tighter one at its foot, so it floats above the photo.
+        // Body: a soft shadow under the slab and a tighter one at its foot, so it floats above the photo.
         tmp.set(npMorph);
-        tmp.inset(14 * k, 0);
-        tmp.offset(0, 30 * k);
-        shadow.setColor(Ui.alpha(0xFF000000, 0.5f * ge));
-        shadows.draw(c, tmp, rad, SHADOW_BLUR * 2.2f * k, shadow);
+        tmp.inset(12 * k, 0);
+        tmp.offset(0, 22 * k);
+        shadow.setColor(Ui.alpha(0xFF000000, 0.45f * ge));
+        shadows.draw(c, tmp, rad, SHADOW_BLUR * 1.8f * k, shadow);
         tmp.set(npMorph);
-        tmp.offset(0, 8 * k);
-        shadow.setColor(Ui.alpha(0xFF000000, 0.3f * ge));
-        shadows.draw(c, tmp, rad, SHADOW_BLUR * 0.8f * k, shadow);
-        drawerGlass(c, npMorph, rad, 0.72f, 0x1A000000, 10 * k, ge);
-        float pad = NPC_PAD * k, L = npCard.left, T = npCard.top;
-        // The glass on the left, the cover big on the right fading into it (option D); the song's own colour tints the
-        // progress. The cover's shader is made once per song, at the card's resting place (it drops from the top right,
-        // so the picture shows itself as the card grows).
-        if (np.version != npcGlowVersion || npcArtAt != npCard.left + npCard.top) {
+        tmp.offset(0, 6 * k);
+        shadow.setColor(Ui.alpha(0xFF000000, 0.28f * ge));
+        shadows.draw(c, tmp, rad, SHADOW_BLUR * 0.7f * k, shadow);
+        drawerGlass(c, npMorph, rad, 0.72f, 0x1A000000, 8 * k, ge);
+        // Whole: the cover big on the right, fading into the glass. Its shader is made once per song at the whole
+        // card's place; the card reveals it as it grows.
+        if (np.version != npcGlowVersion || npcArtAt != npFullRect.left + npFullRect.top) {
             npcGlowVersion = np.version;
-            npcArtAt = npCard.left + npCard.top;
+            npcArtAt = npFullRect.left + npFullRect.top;
             npcAccent = blend(coverColor(np.art), 0xFFFFFFFF, 0.35f);
             npcArtPaint.setShader(null);
             Bitmap big = np.artLarge != null ? np.artLarge : np.art;
             if (big != null && big.getWidth() > 0 && big.getHeight() > 0) {
-                float aw = npCard.width() * 0.6f, al = npCard.right - aw;
-                float s = Math.max(aw / big.getWidth(), npCard.height() / big.getHeight());
+                RectF fr = npFullRect;
+                float aw = fr.width() * 0.6f, al = fr.right - aw;
+                float s = Math.max(aw / big.getWidth(), fr.height() / big.getHeight());
                 android.graphics.Matrix m = new android.graphics.Matrix();
                 m.setScale(s, s);
-                m.postTranslate(al + aw / 2 - big.getWidth() * s / 2, npCard.centerY() - big.getHeight() * s / 2);
+                m.postTranslate(al + aw / 2 - big.getWidth() * s / 2, fr.centerY() - big.getHeight() * s / 2);
                 BitmapShader art = new BitmapShader(big, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
                 art.setLocalMatrix(m);
                 android.graphics.LinearGradient fade = new android.graphics.LinearGradient(al, 0, al + aw * 0.62f, 0,
@@ -4607,26 +4613,23 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 npcArtPaint.setShader(new android.graphics.ComposeShader(art, fade, android.graphics.PorterDuff.Mode.DST_IN));
             }
         }
-        float ae = Ui.clamp(e * 1.6f - 0.3f);
+        float ae = Ui.clamp(f * 1.4f - 0.2f) * ge;
         if (npcArtPaint.getShader() != null && ae > 0.01f) {
             npcArtPaint.setAlpha(Math.round(255 * ae));
             c.drawRoundRect(npMorph, rad, rad, npcArtPaint);
-            // A light shade from the left so the white text reads over the glass and the picture's edge.
+            // A shade from the left (the text) and from the foot (the buttons) over the picture.
             if (npcScrim == null) {
                 npcScrim = new android.graphics.LinearGradient(0, 0, 1, 0, new int[] {0x8C101012, 0x52101012, 0x14101012},
                         new float[] {0, 0.45f, 1}, Shader.TileMode.CLAMP);
+                npcFoot = new android.graphics.LinearGradient(0, 0, 0, 1, new int[] {0x00101012, 0x00101012, 0xB8101012, 0xF2101012},
+                        new float[] {0, 0.3f, 0.72f, 1}, Shader.TileMode.CLAMP);
             }
+            fill.setAlpha(Math.round(255 * ae));
             npcGlowMatrix.setScale(npMorph.width(), 1);
             npcGlowMatrix.postTranslate(npMorph.left, 0);
             npcScrim.setLocalMatrix(npcGlowMatrix);
             fill.setShader(npcScrim);
-            fill.setAlpha(Math.round(255 * ae));
             c.drawRoundRect(npMorph, rad, rad, fill);
-            // And from the foot, so the controls read over the picture's own text.
-            if (npcFoot == null) {
-                npcFoot = new android.graphics.LinearGradient(0, 0, 0, 1, new int[] {0x00101012, 0x00101012, 0xB8101012, 0xF2101012},
-                        new float[] {0, 0.3f, 0.72f, 1}, Shader.TileMode.CLAMP);
-            }
             npcGlowMatrix.setScale(1, npMorph.height());
             npcGlowMatrix.postTranslate(0, npMorph.top);
             npcFoot.setLocalMatrix(npcGlowMatrix);
@@ -4636,110 +4639,130 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             fill.setAlpha(255);
             scene.glass(c, npMorph, rad, 0xFFFFFFFF, 0, 0, 0, 0.02f, 0, ae);   // the glass rim over the picture
         }
-        float te = Ui.clamp((e - 0.55f) / 0.45f);   // the content fades in once it's mostly open
+        // With the focus on the card itself (compact), a white ring around it.
+        float pf = Ui.clamp(playerFocus[0].value) * (1 - f) * ge;
+        if (pf > 0.01f) {
+            focusRing.setStrokeWidth(3.5f * k);
+            focusRing.setColor(Ui.alpha(0xFFFFFFFF, 0.95f * pf));
+            tmp.set(npMorph);
+            tmp.inset(-6 * k, -6 * k);
+            c.drawRoundRect(tmp, rad + 6 * k, rad + 6 * k, focusRing);
+        }
+        float te = Ui.clamp((e - 0.5f) / 0.5f);   // the content fades in once it's mostly open
         if (te <= 0.01f) return;
-        c.save();
-        c.clipRect(npMorph);
-        if (npcTitle == null || npcTitle.getTextSize() != 56 * k) {
-            npcLabel = new TextPaint(Ui.text(Ui.medium, 22 * k, 0xD9FFFFFF));
-            npcTitle = new TextPaint(Ui.text(Ui.displaySemibold, 56 * k, 0xFFFFFFFF));
-            npcArtist = new TextPaint(Ui.text(Ui.regular, 32 * k, 0xCCFFFFFF));
-            npcTime = new TextPaint(Ui.numbers(Ui.medium, 21 * k, 0xCCFFFFFF));
-            for (Paint p : new Paint[] {npcLabel, npcTitle, npcArtist, npcTime}) p.setShadowLayer(10 * k, 0, 2 * k, 0x59000000);
+        if (npcTitle == null || npcTitle.getTextSize() != 40 * k) {
+            npcLabel = new TextPaint(Ui.text(Ui.medium, 18 * k, 0xD9FFFFFF));
+            npcTitle = new TextPaint(Ui.text(Ui.displaySemibold, 40 * k, 0xFFFFFFFF));
+            npcArtist = new TextPaint(Ui.text(Ui.regular, 26 * k, 0xCCFFFFFF));
+            npcTime = new TextPaint(Ui.numbers(Ui.medium, 18 * k, 0xCCFFFFFF));
+            for (Paint p : new Paint[] {npcLabel, npcTitle, npcArtist, npcTime}) p.setShadowLayer(8 * k, 0, 2 * k, 0x59000000);
             npcVersion = -1;
         }
+        float pad = NPC_PAD * k, L = npCard.left, T = npCard.top, R = npCard.right;
+        c.save();
+        c.clipRect(npMorph);
         // The cover, square, top left, lifted off the card by its own shadow; the text beside it.
-        float cs = 150 * k, cl = L + pad + 8 * k, ct = T + 38 * k;
-        cell.set(cl, ct, cl + cs, ct + cs);
+        float cs = NPC_COVER * k;
+        cell.set(L + pad, T + pad, L + pad + cs, T + pad + cs);
         tmp.set(cell);
-        tmp.offset(0, 10 * k);
+        tmp.offset(0, 8 * k);
         shadow.setColor(Ui.alpha(0xFF000000, 0.5f * te));
-        shadows.draw(c, tmp, 18 * k, SHADOW_BLUR * k, shadow);
+        shadows.draw(c, tmp, 14 * k, SHADOW_BLUR * 0.8f * k, shadow);
         if (np.art != null) {
             int alpha = Math.round(255 * te);
             bitmapPaint.setAlpha(alpha);
             imageFill.setAlpha(alpha);
-            roundImage(c, np.art, cell, 18 * k);
+            roundImage(c, np.art, cell, 14 * k);
             bitmapPaint.setAlpha(255);
             imageFill.setAlpha(255);
         } else {
             fill.setShader(null);
             fill.setColor(Ui.alpha(0x24FFFFFF, te));
-            c.drawRoundRect(cell, 18 * k, 18 * k, fill);
+            c.drawRoundRect(cell, 14 * k, 14 * k, fill);
         }
-        float tx = cell.right + 32 * k, tw = npCard.right - pad - tx;
-        if (np.version != npcVersion) {
+        float tx = cell.right + 22 * k;
+        boolean wide = f > 0.5f;   // the whole card has room for a longer title
+        if (np.version != npcVersion || wide != npcWide) {
             npcVersion = np.version;
+            npcWide = wide;
+            float tw = ((wide ? NPC_W2 : NPC_W1) - 2 * NPC_PAD - NPC_COVER - 22) * k;
             npcTitleText = TextUtils.ellipsize(np.title, npcTitle, tw, TextUtils.TruncateAt.END);
             npcArtistText = TextUtils.ellipsize(np.artist, npcArtist, tw, TextUtils.TruncateAt.END);
             String app = np.pkg == null ? "" : shelfLabel(np.pkg);
             npcLabelText = (app.isEmpty() || app.equals(np.pkg) ? "" : app + "  ·  ") + "Esta tele";
         }
-        // Where it plays (the app and this TV), then the title and the artist, top left.
         npcLabel.setColor(Ui.alpha(0xD9FFFFFF, te));
-        c.drawText(npcLabelText, tx, T + 72 * k, npcLabel);
+        c.drawText(npcLabelText, tx, T + 46 * k, npcLabel);
         npcTitle.setColor(Ui.alpha(0xFFFFFFFF, te));
-        c.drawText(npcTitleText, 0, npcTitleText.length(), tx, T + 134 * k, npcTitle);
+        c.drawText(npcTitleText, 0, npcTitleText.length(), tx, T + 92 * k, npcTitle);
         npcArtist.setColor(Ui.alpha(0xCCFFFFFF, te));
-        c.drawText(npcArtistText, 0, npcArtistText.length(), tx, T + 178 * k, npcArtist);
-        // The progress: a thick track, what played in the song's colour with a soft hill of sound rolling over it
-        // while it plays, and a white knob at the playhead; the time played and the length under its ends.
-        float p = Ui.clamp(np.progress()), by = T + 246 * k, bh = 16 * k;
-        float a0 = cl, a1 = npCard.right - pad - 8 * k, head = a0 + (a1 - a0) * p;
+        c.drawText(npcArtistText, 0, npcArtistText.length(), tx, T + 126 * k, npcArtist);
+        // The progress: compact, a thin line under the text; whole, a thick track across the card, what played in the
+        // song's colour with a soft hill of sound rolling over it while it plays, the knob, and the times under it.
+        float p = Ui.clamp(np.progress()), by = lerp(T + 146 * k, T + 176 * k, f), bh = lerp(6, 12, f) * k;
+        float a0 = lerp(tx, L + pad, f), a1 = R - pad, head = a0 + (a1 - a0) * p;
         fill.setShader(null);
         fill.setColor(Ui.alpha(0x47FFFFFF, te));
         tmp.set(a0, by - bh / 2, a1, by + bh / 2);
         c.drawRoundRect(tmp, bh / 2, bh / 2, fill);
         if (head - a0 > bh) {
-            float t = SystemClock.uptimeMillis() / 1000f, span = head - a0;
-            float amp = (np.playing ? 26 : 10) * k;
-            glyphPath.reset();
-            glyphPath.moveTo(a0, by);
-            for (float wx = a0; ; wx += 4 * k) {
-                float xx = Math.min(wx, head), u = (xx - a0) / span;
-                float hill = (float) Math.sin(Math.PI * u);   // starts and ends on the track
-                float roll = np.playing ? 0.6f + 0.4f * (float) Math.sin(u * 7 - t * 2.2f) : 1;
-                glyphPath.lineTo(xx, by - bh / 2 - amp * hill * hill * roll);
-                if (xx >= head) break;
+            if (f > 0.01f) {
+                float t = SystemClock.uptimeMillis() / 1000f, span = head - a0;
+                float amp = (np.playing ? 22 : 8) * k * f;
+                glyphPath.reset();
+                glyphPath.moveTo(a0, by);
+                for (float wx = a0; ; wx += 4 * k) {
+                    float xx = Math.min(wx, head), u = (xx - a0) / span;
+                    float hill = (float) Math.sin(Math.PI * u);   // starts and ends on the track
+                    float roll = np.playing ? 0.6f + 0.4f * (float) Math.sin(u * 7 - t * 2.2f) : 1;
+                    glyphPath.lineTo(xx, by - bh / 2 - amp * hill * hill * roll);
+                    if (xx >= head) break;
+                }
+                glyphPath.lineTo(head, by);
+                glyphPath.close();
+                fill.setColor(Ui.alpha(npcAccent, 0.45f * te));
+                c.drawPath(glyphPath, fill);
             }
-            glyphPath.lineTo(head, by);
-            glyphPath.close();
-            fill.setColor(Ui.alpha(npcAccent, 0.45f * te));
-            c.drawPath(glyphPath, fill);
             fill.setColor(Ui.alpha(npcAccent, te));
             tmp.set(a0, by - bh / 2, head, by + bh / 2);
             c.drawRoundRect(tmp, bh / 2, bh / 2, fill);
         }
-        float knob = 19 * k;
-        tmp.set(head - knob, by - knob, head + knob, by + knob);
-        tmp.offset(0, 3 * k);
-        shadow.setColor(Ui.alpha(0xFF000000, 0.4f * te));
-        shadows.draw(c, tmp, knob, SHADOW_BLUR * 0.5f * k, shadow);
+        float knob = lerp(8, 15, f) * k;
         fill.setColor(Ui.alpha(0xFFFAF6F2, te));
         c.drawCircle(head, by, knob, fill);
-        String done = time(np.duration * p), total = time(np.duration);
-        npcTime.setColor(Ui.alpha(0xCCFFFFFF, te));
-        c.drawText(done, a0, by + 48 * k, npcTime);
-        c.drawText(total, a1 - npcTime.measureText(total), by + 48 * k, npcTime);
-        // The controls, centred under it: white symbols with no circles; the focused one on a white disc.
-        updateCtrlKinds(np);
-        int n = ctrlKinds.length;
-        float step = 118 * k, cy = T + 344 * k, x0 = npCard.centerX() - (n - 1) * step / 2;
-        for (int i = 0; i < n; i++) {
-            int kind = ctrlKinds[i];
-            float f = Ui.clamp(ctrlFocus[i].value), cx = x0 + i * step;
-            float u = (kind == C_PLAY ? 22 : 15) * k * (1 + 0.08f * f);
-            if (f > 0.01f) {
-                float r = (kind == C_PLAY ? 44 : 36) * k * (0.85f + 0.15f * f);
-                fill.setColor(Ui.alpha(0xFFFFFFFF, f * te));
-                c.drawCircle(cx, cy, r, fill);
-            }
-            fill.setColor(Ui.alpha(blend(0xF7FFFFFF, 0xFF141414, f), te));
-            boolean active = (kind == C_SHUFFLE && np.shuffleOn) || (kind == C_REPEAT && np.repeatMode != 0);
-            if (active && f < 0.5f) fill.setColor(Ui.alpha(npcAccent, te));
-            drawControlGlyph(c, kind == C_PLAY ? (np.playing ? 3 : 1) : kind, cx, cy, u);
+        if (f > 0.01f) {
+            String done = time(np.duration * p), total = time(np.duration);
+            npcTime.setColor(Ui.alpha(0xCCFFFFFF, te * f));
+            c.drawText(done, a0, by + 40 * k, npcTime);
+            c.drawText(total, a1 - npcTime.measureText(total), by + 40 * k, npcTime);
         }
         c.restore();
+        // The capsule's own row of glass buttons: under the compact card, inside the whole one (it drops into it).
+        updateCtrlKinds(np);
+        int n = ctrlKinds.length;
+        float dia = 54 * k, gap = 14 * k;
+        float cy = lerp(T + (NPC_H1 + 22) * k + dia / 2, T + (NPC_H2 - 30) * k - dia / 2, fo);
+        float x0 = npCard.centerX() - (n - 1) * (dia + gap) / 2;
+        for (int i = 0; i < n; i++) {
+            int kind = ctrlKinds[i];
+            float cf = Ui.clamp(ctrlFocus[i].value), s = 1 + 0.12f * cf, r = dia / 2 * s * (kind == C_PLAY ? 1.12f : 1);
+            float cx = x0 + i * (dia + gap);
+            cell.set(cx - r, cy - r, cx + r, cy + r);
+            tmp.set(cell);
+            tmp.offset(0, (4 + 6 * cf) * k);
+            shadow.setColor(Ui.alpha(0xFF000000, (0.28f + 0.15f * cf) * te));
+            shadows.draw(c, tmp, r, SHADOW_BLUR * 0.7f * k, shadow);
+            scene.liquid(c, cell, r, tone(0xFFFFFFFF, SMOKE), tone(0.55f, 0.5f), tone(0.02f, 0.01f), 10 * k, 7 * k,
+                    tone(0.6f, 0.45f), te * (1 - cf));
+            if (cf > 0.01f) {
+                fill.setColor(Ui.alpha(0xFFFFFFFF, cf * te));
+                c.drawCircle(cx, cy, r, fill);
+            }
+            fill.setColor(Ui.alpha(blend(0xF2FFFFFF, 0xFF141414, cf), te));
+            boolean active = (kind == C_SHUFFLE && np.shuffleOn) || (kind == C_REPEAT && np.repeatMode != 0);
+            if (active && cf < 0.5f) fill.setColor(Ui.alpha(npcAccent, te));
+            drawControlGlyph(c, kind == C_PLAY ? (np.playing ? 3 : 1) : kind, cx, cy, r * 0.38f);
+        }
     }
 
     /** The cover's average colour, brightened so it glows (white without a cover). */
