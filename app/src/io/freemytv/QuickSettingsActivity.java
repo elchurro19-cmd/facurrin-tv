@@ -79,6 +79,12 @@ public class QuickSettingsActivity extends Activity {
         Runnable stay;
         /** Done when OK is held (then `stay` waits for the release, so a hold doesn't also do it). */
         Runnable hold;
+        /** Glass edition (option C1): a slider across the panel; ← → call `adjust`, `level` (0 to 1) fills it. */
+        boolean wide;
+        java.util.function.IntConsumer adjust;
+        java.util.function.DoubleSupplier level;
+        final android.graphics.RectF rect = new android.graphics.RectF();
+        int row;
 
         Tile(String title, String symbol, Runnable action) {
             this.title = title;
@@ -128,6 +134,35 @@ public class QuickSettingsActivity extends Activity {
             Context c = getContext();
             tiles.add(wifi = new Tile("Wi-Fi", "wifi", () -> open(new Intent(Settings.ACTION_WIFI_SETTINGS))));
             tiles.add(bluetooth = new Tile("Bluetooth", "bluetooth", () -> open(bluetoothSettings())));
+            // Glass edition (option C1, like the iPhone's): brightness and volume as wide sliders.
+            final Tile bright = new Tile("Brillo del inicio", "sunny", null);
+            bright.wide = true;
+            bright.level = () -> 1 - Prefs.launcherDim(c) / 100.0;
+            bright.adjust = d -> {
+                int[] lv = Prefs.DIM_LEVELS;   // dimmest last: right brightens (towards 0), left dims
+                int now = Prefs.launcherDim(c), at = 0;
+                for (int i = 0; i < lv.length; i++) if (lv[i] == now) at = i;
+                int[] order = lv.clone();
+                java.util.Arrays.sort(order);
+                int pos = java.util.Arrays.binarySearch(order, now);
+                if (pos < 0) pos = 0;
+                pos = Math.max(0, Math.min(order.length - 1, pos - d));
+                Prefs.setLauncherDim(c, order[pos]);
+            };
+            bright.stay = () -> { };
+            tiles.add(bright);
+            final android.media.AudioManager audio = c.getSystemService(android.media.AudioManager.class);
+            if (audio != null) {
+                final Tile volume = new Tile("Volumen", "speaker", null);
+                volume.wide = true;
+                volume.level = () -> audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+                        / (double) Math.max(1, audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC));
+                volume.adjust = d -> audio.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC,
+                        d > 0 ? android.media.AudioManager.ADJUST_RAISE : android.media.AudioManager.ADJUST_LOWER, 0);
+                volume.stay = () -> audio.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC,
+                        android.media.AudioManager.ADJUST_TOGGLE_MUTE, 0);
+                tiles.add(volume);
+            }
             Tile dream = new Tile("Protector", "bedtime", () -> slideOutThen(() -> {
                 // Straight into the screensaver: the panel has slid away, so no closing animation of its own.
                 try {
@@ -168,19 +203,6 @@ public class QuickSettingsActivity extends Activity {
             Tile all = new Tile("Ajustes", "settings", () -> open(new Intent(Settings.ACTION_SETTINGS)));
             all.sub = "Todos los ajustes";
             tiles.add(all);
-            // The home screen's own brightness: each OK dims it one step more, then back to full. Seen live behind the panel.
-            final Tile dim = new Tile("Brillo del inicio", "sunny", null);
-            dim.sub = dimText(Prefs.launcherDim(c));
-            dim.stay = () -> {
-                int now = Prefs.launcherDim(c), next = Prefs.DIM_LEVELS[0];
-                for (int i = 0; i < Prefs.DIM_LEVELS.length; i++) {
-                    if (Prefs.DIM_LEVELS[i] == now) next = Prefs.DIM_LEVELS[(i + 1) % Prefs.DIM_LEVELS.length];
-                }
-                Prefs.setLauncherDim(c, next);
-                dim.sub = dimText(next);
-                invalidate();
-            };
-            tiles.add(dim);
             Tile home = new Tile("Ajustes de inicio", "sparkles", () -> open(new Intent(c, SettingsActivity.class)));
             tiles.add(home);
             // The DLNA receiver lives in the remote's service: only where that service runs.
@@ -315,19 +337,33 @@ public class QuickSettingsActivity extends Activity {
                     close();
                     return true;
                 case KeyEvent.KEYCODE_DPAD_UP:
-                    if (t % 2 == 1 && focus == t - 1) focus = t - 2;   // the odd last tile sits on the right
-                    else if (focus >= 2) focus -= 2;
+                case KeyEvent.KEYCODE_DPAD_DOWN: {
+                    // By rows (a slider is a row of its own): to the nearest tile of the row above or below.
+                    int row = tiles.get(focus).row + (e.getKeyCode() == KeyEvent.KEYCODE_DPAD_DOWN ? 1 : -1);
+                    float cx = tiles.get(focus).rect.centerX(), best = Float.MAX_VALUE;
+                    for (int i = 0; i < t; i++) {
+                        Tile o = tiles.get(i);
+                        if (o.row != row) continue;
+                        float d = Math.abs(o.rect.centerX() - cx);
+                        if (d < best) {
+                            best = d;
+                            focus = i;
+                        }
+                    }
                     break;
-                case KeyEvent.KEYCODE_DPAD_DOWN:
-                    if (focus + 2 < t) focus += 2;
-                    else if (t % 2 == 1 && focus == t - 2) focus = t - 1;
-                    break;
+                }
                 case KeyEvent.KEYCODE_DPAD_LEFT:
-                    if (focus % 2 == 1) focus--;
+                case KeyEvent.KEYCODE_DPAD_RIGHT: {
+                    int d = e.getKeyCode() == KeyEvent.KEYCODE_DPAD_RIGHT ? 1 : -1;
+                    Tile cur = tiles.get(focus);
+                    if (cur.wide) {   // a slider: ← → move it
+                        cur.adjust.accept(d);
+                        break;
+                    }
+                    int next = focus + d;
+                    if (next >= 0 && next < t && tiles.get(next).row == cur.row) focus = next;
                     break;
-                case KeyEvent.KEYCODE_DPAD_RIGHT:
-                    if (focus % 2 == 0 && focus + 1 < t) focus++;
-                    break;
+                }
                 default:
                     if (!isOk(e.getKeyCode())) return false;
                     Tile tile = tiles.get(focus);
@@ -403,27 +439,78 @@ public class QuickSettingsActivity extends Activity {
             date.setTextAlign(Paint.Align.LEFT);
         }
 
-        /** Two columns of tiles from `top`; returns where they end. */
+        /** Two columns of tiles from `top`, a slider taking a whole row; returns where they end. */
         private float drawTiles(Canvas c, float x, float right, float top) {
-            float gap = 14 * k, tw = (right - x - gap) / 2, th = 120 * k;
+            float gap = 12 * k, tw = (right - x - gap) / 2, th = 112 * k, sh = 76 * k;
+            float y = top;
+            int row = 0, col = 0;
             for (int i = 0; i < tiles.size(); i++) {
                 Tile t = tiles.get(i);
-                // An odd last one (Change background) sits apart, at the panel's bottom right corner.
-                boolean apart = tiles.size() % 2 == 1 && i == tiles.size() - 1;
-                int col = apart ? 1 : i % 2;
-                float tx = x + col * (tw + gap), ty = apart ? getHeight() - 56 * k - th : top + (i / 2) * (th + gap);
-                r.set(tx, ty, tx + tw, ty + th);
+                if (t.wide) {
+                    if (col == 1) {
+                        y += th + gap;
+                        row++;
+                        col = 0;
+                    }
+                    t.rect.set(x, y, right, y + sh);
+                    t.row = row++;
+                    y += sh + gap;
+                    continue;
+                }
+                t.rect.set(x + col * (tw + gap), y, x + col * (tw + gap) + tw, y + th);
+                t.row = row;
+                if (col == 1 || i == tiles.size() - 1 || tiles.get(i + 1).wide) {
+                    y += th + gap;
+                    row++;
+                    col = 0;
+                } else {
+                    col = 1;
+                }
+            }
+            for (int i = 0; i < tiles.size(); i++) {
+                Tile t = tiles.get(i);
+                r.set(t.rect);
                 boolean on = focus == i;
+                if (t.wide) {
+                    drawSlider(c, t, on);
+                    continue;
+                }
                 box(c, r, 26 * k, on);
                 int ink = on ? 0xFF1C1C1E : 0xEBFFFFFF;
-                drawGlyph(c, t.symbol, r.left + 38 * k, r.top + 38 * k, 15 * k, ink);
+                drawGlyph(c, t.symbol, r.left + 34 * k, r.top + 30 * k, 13 * k, ink);
                 title.setColor(on ? 0xFF1C1C1E : 0xFFFFFFFF);
                 sub.setColor(on ? 0x991C1C1E : 0x99FFFFFF);
-                c.drawText(fit(t.title, title, tw - 40 * k), r.left + 22 * k, r.bottom - 42 * k, title);
-                c.drawText(fit(t.sub, sub, tw - 40 * k), r.left + 22 * k, r.bottom - 16 * k, sub);
+                c.drawText(fit(t.title, title, tw - 40 * k), r.left + 22 * k, r.bottom - 40 * k, title);
+                c.drawText(fit(t.sub, sub, tw - 40 * k), r.left + 22 * k, r.bottom - 14 * k, sub);
             }
-            int rows = (tiles.size() + 1) / 2;
-            return top + rows * th + (rows - 1) * gap;
+            return y;
+        }
+
+        /** A slider like the iPhone's: a glass bar filled white up to its level, its symbol and name over it. */
+        private void drawSlider(Canvas c, Tile t, boolean on) {
+            float rad = r.height() / 2;
+            box(c, r, rad, false);
+            float lv = (float) Math.max(0, Math.min(1, t.level.getAsDouble()));
+            float fw = Math.max(r.height(), r.width() * lv);
+            fill.setShader(null);
+            fill.setColor(0xF2FFFFFF);
+            c.save();
+            c.clipRect(r.left, r.top, r.left + fw, r.bottom);
+            c.drawRoundRect(r, rad, rad, fill);
+            c.restore();
+            // Dark over the white fill, white over the glass.
+            drawGlyph(c, t.symbol, r.left + 42 * k, r.centerY(), 15 * k, fw > 60 * k ? 0xFF1C1C1E : 0xEBFFFFFF);
+            title.setColor(fw > 76 * k + title.measureText(t.title) ? 0xFF1C1C1E : 0xFFFFFFFF);
+            c.drawText(t.title, r.left + 76 * k, r.centerY() + Ui.halfCap(title), title);
+            String pct = Math.round(lv * 100) + " %";
+            sub.setColor(lv > 0.88f ? 0x991C1C1E : 0xCCFFFFFF);
+            c.drawText(pct, r.right - 26 * k - sub.measureText(pct), r.centerY() + Ui.halfCap(sub), sub);
+            if (on) {   // the focus: a white ring, and ← → move it
+                rim.setShader(null);
+                rim.setColor(0xFFFFFFFF);
+                rim.setStrokeWidth(3.5f * k);
+                c.drawRoundRect(r.left - 6 * k, r.top - 6 * k, r.right + 6 * k, r.bottom + 6 * k, rad + 6 * k, rad + 6 * k, rim);
+            }
         }
 
         /** A tile: a pane of glass, lighter at the top, with a lit rim; focused, white (the tvOS focus), slightly larger. */
