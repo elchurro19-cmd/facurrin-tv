@@ -2132,7 +2132,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         shadowDeep.setColor(Ui.alpha(0xFF000000, tone(0.14f, 0.3f) + tone(0.18f, 0.3f) * fc + 0.14f * Ui.clamp(l)));
         shadows.draw(c, tmp, r0, DEEP_BLUR * k, shadowDeep);
         c.restore();
-        if (fc > 0.01f && it.tile != null) drawAmbilight(c, it.tile, cell, r, fc);
+        // Glass edition: no coloured glow around the focused app (the white rim and the rise mark it).
+        if (SHELF_GLOW && fc > 0.01f && it.tile != null) drawAmbilight(c, it.tile, cell, r, fc);
         int[] style = TILE_STYLE.get(it.key);
         if (it.logo != null && style != null) {
             if (tileShaders.length != shelf.size() || tileShaderH != bh) {
@@ -2180,6 +2181,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     }
 
     private static final float FOCUS_RISE = 12;
+    private static final boolean SHELF_GLOW = false;
     private final Paint focusRing = new Paint(Paint.ANTI_ALIAS_FLAG);
     { focusRing.setStyle(Paint.Style.STROKE); }
 
@@ -4312,6 +4314,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private final Spring[] hintShow = {new Spring(0.3f, 0.85f, 0)};
     private final Spring[] artShow = {new Spring(0.2f, 0.95f, 0)};
     private static final long ART_REST_MS = 1000;
+    /** Off: the person preferred the home's own picture to stay (the hint and the bubble remain). */
+    private static final boolean CONTENT_BACKGROUND = false;
     private final Runnable artRest = this::restOnApp;
     private int artTries;
     private Bitmap artBlur;
@@ -4513,7 +4517,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         handler.removeCallbacks(artRest);
         artShow[0].target = 0;
         artTries = 0;
-        if (pkg != null) handler.postDelayed(artRest, ART_REST_MS);
+        if (CONTENT_BACKGROUND && pkg != null) handler.postDelayed(artRest, ART_REST_MS);
         handler.removeCallbacks(watchDebounce);
         if (pkg == null) pickWatch();
         else handler.postDelayed(watchDebounce, WATCH_DEBOUNCE_MS);
