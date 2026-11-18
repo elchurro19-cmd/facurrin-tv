@@ -5055,21 +5055,26 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         tmp.offset(0, 22 * k);
         shadow.setColor(Ui.alpha(0xFF000000, 0.45f * ge));
         shadows.draw(c, tmp, 32 * k, SHADOW_BLUR * 1.8f * k, shadow);
-        // The glass, clipped to the L; a darker tint so the text reads; the lit rim along its edge.
+        // The same glass as the capsule and the round buttons (clipped to the L), a light shade so the text reads, and
+        // their rim lit from the top left along the L's edge.
         c.save();
         c.clipPath(npShape);
-        drawerGlass(c, npMorph, 32 * k, 0.72f, 0x1A000000, 0, ge);
+        scene.liquid(c, npMorph, 32 * k, tone(0xFFFFFFFF, SMOKE), tone(0.55f, 0.5f), tone(0.02f, 0.01f), 12 * k, 8 * k,
+                tone(0.6f, 0.45f), ge);
         fill.setShader(null);
-        fill.setColor(Ui.alpha(BUBBLE_FILL, ge));
+        fill.setColor(Ui.alpha(0x26000000, ge));
         c.drawRect(npMorph, fill);
         c.restore();
         if (npRim == null) {
             npRim = new Paint(Paint.ANTI_ALIAS_FLAG);
             npRim.setStyle(Paint.Style.STROKE);
         }
-        npRim.setStrokeWidth(2 * k);
-        npRim.setColor(Ui.alpha(0x73FFFFFF, ge));
+        npRim.setStrokeWidth(Math.max(1.5f, 2.2f * k));
+        npRim.setShader(new LinearGradient(L, T, R, B, new int[] {0x99FFFFFF, 0x24FFFFFF, 0x47FFFFFF},
+                new float[] {0, 0.62f, 1}, Shader.TileMode.CLAMP));
+        npRim.setAlpha(Math.round(255 * ge));
         c.drawPath(npShape, npRim);
+        npRim.setShader(null);
         // With the focus on the player itself (not its bar or its buttons), the rim turns white.
         float pf = Ui.clamp(playerFocus[0].value) * ge;
         if (pf > 0.01f) {
