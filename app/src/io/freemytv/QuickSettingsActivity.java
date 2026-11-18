@@ -85,6 +85,10 @@ public class QuickSettingsActivity extends Activity {
         java.util.function.DoubleSupplier level;
         final android.graphics.RectF rect = new android.graphics.RectF();
         int row;
+        /** Option B: a section heading drawn above it, a whole-width row, and a switch showing its state. */
+        String section;
+        boolean line;
+        java.util.function.BooleanSupplier on;
 
         Tile(String title, String symbol, Runnable action) {
             this.title = title;
@@ -119,6 +123,7 @@ public class QuickSettingsActivity extends Activity {
             glyph.setStrokeCap(Paint.Cap.ROUND);
             glyph.setStrokeJoin(Paint.Join.ROUND);
             buildTiles();
+            arrangeTiles();
             loadGlass(c);
             ValueAnimator in = ValueAnimator.ofFloat(0, 1);
             in.setDuration(280);
@@ -138,16 +143,9 @@ public class QuickSettingsActivity extends Activity {
             final Tile bright = new Tile("Brillo del inicio", "sunny", null);
             bright.wide = true;
             bright.level = () -> 1 - Prefs.launcherDim(c) / 100.0;
-            bright.adjust = d -> {
-                int[] lv = Prefs.DIM_LEVELS;   // dimmest last: right brightens (towards 0), left dims
-                int now = Prefs.launcherDim(c), at = 0;
-                for (int i = 0; i < lv.length; i++) if (lv[i] == now) at = i;
-                int[] order = lv.clone();
-                java.util.Arrays.sort(order);
-                int pos = java.util.Arrays.binarySearch(order, now);
-                if (pos < 0) pos = 0;
-                pos = Math.max(0, Math.min(order.length - 1, pos - d));
-                Prefs.setLauncherDim(c, order[pos]);
+            bright.adjust = d -> {   // 10 % to 100 %, a tenth a step: right brightens, left dims
+                int now = Math.round(Prefs.launcherDim(c) / 10f) * 10;
+                Prefs.setLauncherDim(c, Math.max(0, Math.min(90, now - d * 10)));
             };
             bright.stay = () -> { };
             tiles.add(bright);
@@ -203,7 +201,7 @@ public class QuickSettingsActivity extends Activity {
             Tile all = new Tile("Ajustes", "settings", () -> open(new Intent(Settings.ACTION_SETTINGS)));
             all.sub = "Todos los ajustes";
             tiles.add(all);
-            Tile home = new Tile("Ajustes de inicio", "sparkles", () -> open(new Intent(c, SettingsActivity.class)));
+            Tile home = new Tile("Inicio", "sparkles", () -> open(new Intent(c, SettingsActivity.class)));
             tiles.add(home);
             // The DLNA receiver lives in the remote's service: only where that service runs.
             String services = Settings.Secure.getString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
@@ -221,7 +219,7 @@ public class QuickSettingsActivity extends Activity {
             // Over Home with a picture behind it: the next picture, seen changing behind the panel.
             // Held: the next kind of picture (landscapes, art, favourites).
             if (HomeActivity.shown && !Prefs.homeBackgroundShown(c).equals("black")) {
-                final Tile bg = new Tile("Cambiar fondo", "sync", null);
+                final Tile bg = new Tile("Fondo", "sync", null);
                 bg.sub = kindName(Prefs.homeBackgroundShown(c));   // the kind of picture (hold OK to change it)
                 bg.stay = () -> Prefs.skipHomeBackground(c);
                 // While a seasonal theme is on, the pictures are the theme's: no other kind to turn to.
@@ -236,6 +234,50 @@ public class QuickSettingsActivity extends Activity {
                 };
                 tiles.add(bg);
             }
+        }
+
+        /**
+         * Option B: sections with rows. Connections (Wi-Fi, Bluetooth with their switches), screen and sound (the
+         * sliders, the dark screensaver, picture and sound), then the shortcuts in two columns.
+         */
+        private void arrangeTiles() {
+            java.util.List<Tile> rows = new ArrayList<>(), shortcuts = new ArrayList<>();
+            Tile dream = null, dark = null, picture = null, bright = null, volume = null;
+            for (Tile t : tiles) {
+                switch (t.title) {
+                    case "Protector": dream = t; break;
+                    case "Protector oscuro": dark = t; break;
+                    case "Imagen y sonido": picture = t; break;
+                    case "Brillo del inicio": bright = t; break;
+                    case "Volumen": volume = t; break;
+                    default: if (t != wifi && t != bluetooth) shortcuts.add(t);
+                }
+            }
+            wifi.line = bluetooth.line = true;
+            wifi.section = "CONEXIONES";
+            wifi.on = () -> wifiState;
+            bluetooth.on = () -> btState;
+            rows.add(wifi);
+            rows.add(bluetooth);
+            Tile firstScreen = bright != null ? bright : volume;
+            if (bright != null) rows.add(bright);
+            if (volume != null) rows.add(volume);
+            if (dark != null) {
+                dark.line = true;
+                final Context c = getContext();
+                dark.on = () -> DreamView.dark(c);
+                rows.add(dark);
+            }
+            if (picture != null) {
+                picture.line = true;
+                rows.add(picture);
+            }
+            if (firstScreen != null) firstScreen.section = "PANTALLA Y SONIDO";
+            if (dream != null) shortcuts.add(0, dream);
+            if (!shortcuts.isEmpty()) shortcuts.get(0).section = "ATAJOS";
+            tiles.clear();
+            tiles.addAll(rows);
+            tiles.addAll(shortcuts);
         }
 
         /**
@@ -272,6 +314,8 @@ public class QuickSettingsActivity extends Activity {
             }
         }
 
+        private boolean wifiState, btState;
+
         void refresh() {
             ConnectivityManager cm = getContext().getSystemService(ConnectivityManager.class);
             NetworkCapabilities nc = cm == null || cm.getActiveNetwork() == null ? null : cm.getNetworkCapabilities(cm.getActiveNetwork());
@@ -285,6 +329,8 @@ public class QuickSettingsActivity extends Activity {
             } catch (SecurityException ignored) {
             }
             bluetooth.sub = btOn ? "Activado" : "Desactivado";
+            wifiState = online;
+            btState = btOn;
             invalidate();
         }
 
@@ -401,11 +447,8 @@ public class QuickSettingsActivity extends Activity {
             panelRect.set(x0, 0, x0 + pw + 60 * k, h);
             glassPanel(c, panelRect, 44 * k, w, h);
             float x = x0 + 48 * k, right = x0 + pw - 48 * k;
-            long now = System.currentTimeMillis();
-            c.drawText(new SimpleDateFormat("HH:mm", Locale.US).format(new Date(now)), x, 140 * k, clock);   // as the home clock
-            c.drawText(Ui.datePattern("EEEE d 'de' MMMM").format(now), x, 182 * k, date);
-            drawWeather(c, right, x + date.measureText(Ui.datePattern("EEEE d 'de' MMMM").format(now)) + 24 * k);
-            drawTiles(c, x, right, 226 * k);
+            // Option B: no clock or weather (the home shows them); the sections from the top.
+            drawTiles(c, x, right, 64 * k);
             // The home screen's brightness applies to the panel too (only over it: the home behind is already dimmed).
             int dim = Prefs.launcherDim(getContext());
             if (dim > 0) {
@@ -439,27 +482,43 @@ public class QuickSettingsActivity extends Activity {
             date.setTextAlign(Paint.Align.LEFT);
         }
 
-        /** Two columns of tiles from `top`, a slider taking a whole row; returns where they end. */
+        private TextPaint section;
+
+        /** Sections of whole-width rows and sliders, then the shortcuts two by two; returns where they end. */
         private float drawTiles(Canvas c, float x, float right, float top) {
-            float gap = 12 * k, tw = (right - x - gap) / 2, th = 112 * k, sh = 76 * k;
+            if (section == null) {
+                section = new TextPaint(Ui.text(Ui.semibold, 18 * k, 0x99FFFFFF));
+                section.setLetterSpacing(0.14f);
+            }
+            float gap = 12 * k, tw = (right - x - gap) / 2, lh = 74 * k, sh = 66 * k, th = 74 * k;
             float y = top;
             int row = 0, col = 0;
             for (int i = 0; i < tiles.size(); i++) {
                 Tile t = tiles.get(i);
-                if (t.wide) {
+                if (t.section != null) {
                     if (col == 1) {
                         y += th + gap;
                         row++;
                         col = 0;
                     }
-                    t.rect.set(x, y, right, y + sh);
+                    y += 34 * k;
+                    c.drawText(t.section, x + 6 * k, y - 12 * k, section);
+                }
+                if (t.wide || t.line) {
+                    if (col == 1) {
+                        y += th + gap;
+                        row++;
+                        col = 0;
+                    }
+                    float hh = t.wide ? sh : lh;
+                    t.rect.set(x, y, right, y + hh);
                     t.row = row++;
-                    y += sh + gap;
+                    y += hh + gap;
                     continue;
                 }
                 t.rect.set(x + col * (tw + gap), y, x + col * (tw + gap) + tw, y + th);
                 t.row = row;
-                if (col == 1 || i == tiles.size() - 1 || tiles.get(i + 1).wide) {
+                if (col == 1 || i == tiles.size() - 1) {
                     y += th + gap;
                     row++;
                     col = 0;
@@ -475,15 +534,31 @@ public class QuickSettingsActivity extends Activity {
                     drawSlider(c, t, on);
                     continue;
                 }
-                box(c, r, 26 * k, on);
+                box(c, r, 22 * k, on);
                 int ink = on ? 0xFF1C1C1E : 0xEBFFFFFF;
-                drawGlyph(c, t.symbol, r.left + 34 * k, r.top + 30 * k, 13 * k, ink);
+                drawGlyph(c, t.symbol, r.left + 36 * k, r.centerY(), 13 * k, ink);
                 title.setColor(on ? 0xFF1C1C1E : 0xFFFFFFFF);
                 sub.setColor(on ? 0x991C1C1E : 0x99FFFFFF);
-                c.drawText(fit(t.title, title, tw - 40 * k), r.left + 22 * k, r.bottom - 40 * k, title);
-                c.drawText(fit(t.sub, sub, tw - 40 * k), r.left + 22 * k, r.bottom - 14 * k, sub);
+                float tx = r.left + 70 * k, room = r.right - tx - (t.on != null ? 96 * k : 20 * k);
+                boolean two = t.sub != null && !t.sub.isEmpty() && t.line;
+                c.drawText(fit(t.title, title, room), tx, two ? r.centerY() - 4 * k : r.centerY() + Ui.halfCap(title), title);
+                if (two) c.drawText(fit(t.sub, sub, room), tx, r.centerY() + 24 * k, sub);
+                if (t.on != null) drawSwitch(c, r.right - 24 * k, r.centerY(), t.on.getAsBoolean(), on);
             }
             return y;
+        }
+
+        /** A switch with no colour: white with a dark knob when on, glass with a white knob when off. */
+        private void drawSwitch(Canvas c, float right, float cy, boolean isOn, boolean focused) {
+            float w = 62 * k, h = 34 * k;
+            r.set(right - w, cy - h / 2, right, cy + h / 2);
+            fill.setShader(null);
+            int track = isOn ? (focused ? 0xFF1C1C1E : 0xFFFFFFFF) : (focused ? 0x33000000 : 0x40FFFFFF);
+            fill.setColor(track);
+            c.drawRoundRect(r, h / 2, h / 2, fill);
+            float kr = h / 2 - 4 * k, kx = isOn ? r.right - h / 2 : r.left + h / 2;
+            fill.setColor(isOn ? (focused ? 0xFFFFFFFF : 0xFF1C1C1E) : 0xFFFFFFFF);
+            c.drawCircle(kx, cy, kr, fill);
         }
 
         /** A slider like the iPhone's: a glass bar filled white up to its level, its symbol and name over it. */

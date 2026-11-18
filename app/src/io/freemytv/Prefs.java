@@ -84,7 +84,7 @@ final class Prefs {
     static final int[] DIM_LEVELS = {0, 20, 40, 60};
 
     static int launcherDim(Context c) {
-        return Math.max(0, Math.min(80, readInt(c, "launcher-dim.txt", 0)));
+        return Math.max(0, Math.min(90, readInt(c, "launcher-dim.txt", 0)));
     }
 
     static void setLauncherDim(Context c, int percent) {
