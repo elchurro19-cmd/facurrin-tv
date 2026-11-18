@@ -114,6 +114,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private static final int Z_WATCH = 13;
     /** Glass edition: the open player's progress bar (← → move the playhead). */
     private static final int Z_PLAYER_BAR = 14;
+    /** Glass edition: the sleep timer's panel (row 0 its switch, row 1 the times). */
+    private static final int Z_SLEEP = 15;
     /** The drawer's weather card: page 0 the next hours, page 1 the next seven days. */
     private final Spring[] weatherFocus = {new Spring(0.26f, 0.85f, 0)};
     private int weatherPage;
@@ -1276,7 +1278,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         if (reorderAnim) tilesMoving |= stepReorder(dt, up);
         boolean statusMoving = step(statusFocus, dt);
         boolean heroMoving = heroFocus.step(dt);
-        boolean topMoving = step(topFocus, dt) | step(playerFocus, dt) | step(avatarFocus, dt) | step(npExpand, dt) | step(ctrlFocus, dt) | step(ctrlShow, dt) | step(npOpen, dt) | step(npFull, dt) | step(barFocus, dt) | step(searchPill, dt) | step(micFocus, dt), cardsMoving = step(cardFocus, dt) | step(recentFocus, dt);
+        boolean topMoving = step(topFocus, dt) | step(playerFocus, dt) | step(avatarFocus, dt) | step(npExpand, dt) | step(ctrlFocus, dt) | step(ctrlShow, dt) | step(npOpen, dt) | step(npFull, dt) | step(barFocus, dt) | step(searchPill, dt) | step(micFocus, dt) | step(sleepOpen, dt) | step(sleepFocus, dt), cardsMoving = step(cardFocus, dt) | step(recentFocus, dt);
         if (topMoving) placeWatch();   // the island fades out while the player opens in its place
         boolean watchMoving = step(watchFocus, dt) | step(actFocus, dt);
         boolean shelfUpMoving = step(bubbleShow, dt);
@@ -2749,6 +2751,12 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             npFull[0].target = full ? 1 : 0;
             statusChanged = heroChanged = true;
         }
+        boolean inSleep = !sheetOpen && zone == Z_SLEEP;
+        if (sleepOpen[0].target != (inSleep ? 1 : 0)) {
+            sleepOpen[0].target = inSleep ? 1 : 0;
+            heroChanged = true;
+        }
+        heroChanged |= aim(sleepFocus, inSleep ? (sleepRow == 0 ? 0 : 1 + sleepIdx) : -1, snap);
         boolean onSearch = !sheetOpen && zone == Z_TOP && topIndex == 3;
         if (!onSearch) inMic = false;
         statusChanged |= aim(searchPill, onSearch ? 0 : -1, snap);
@@ -3131,6 +3139,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             retarget(false);
         } else if (zone == Z_IDLE) {
             return;
+        } else if (zone == Z_SLEEP) {
+            zone = Z_TOP;   // the sleep panel folds back into its button
+            topIndex = sleepButton();
+            retarget(false);
         } else if (zone == Z_PLAYER_CTRL || zone == Z_PLAYER_BAR) {
             zone = Z_PLAYER;   // from its bar or its buttons back to the player itself
             retarget(false);
@@ -3372,6 +3384,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             retarget(false);
             statusDirty = heroDirty = true;
             click.open();
+            return;
+        } else if (zone == Z_SLEEP) {
+            sleepOk();
             return;
         } else if (zone == Z_PLAYER_BAR) {
             if (nowPlaying != null) nowPlaying.toggle();   // OK on the bar: play or pause
@@ -4076,6 +4091,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             if (up > 0.01f) drawSmallClock(c, up);
             drawShelfHint(c);
             drawNpCard(c);
+            drawSleepPanel(c);
             return;
         }
         String hello = Ui.tr("For You");
@@ -5506,6 +5522,153 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         return true;
     }
 
+    // MARK: Glass edition: the sleep timer's panel (option T1), dropping from its button like the player
+
+    private final Spring[] sleepOpen = {new Spring(0.28f, 0.76f, 0)};
+    private final Spring[] sleepFocus = new Spring[8];
+    {
+        for (int i = 0; i < sleepFocus.length; i++) sleepFocus[i] = new Spring(0.3f, 0.85f, 0);
+    }
+    private int sleepRow = 1, sleepIdx, sleepSetIdx = -1;
+    private static final int[] SLEEP_MIN = {15, 30, 45, 60, 120};
+    private static final String[] SLEEP_TEXT = {"15 min", "30 min", "45 min", "1 h", "2 h"};
+    private final RectF sleepCard = new RectF(), sleepMorph = new RectF();
+    private TextPaint sleepTitle, sleepPill, sleepFoot;
+    private final RectF[] sleepPills = new RectF[6];
+    {
+        for (int i = 0; i < sleepPills.length; i++) sleepPills[i] = new RectF();
+    }
+
+    /** The times on offer; "Fin del tema" too while a song with a length plays (what's left of it). */
+    private int[] sleepChoices() {
+        NowPlaying np = nowPlaying;
+        if (np == null || !np.visible() || np.duration <= 0) return SLEEP_MIN;
+        int[] out = java.util.Arrays.copyOf(SLEEP_MIN, SLEEP_MIN.length + 1);
+        out[SLEEP_MIN.length] = -1;
+        return out;
+    }
+
+    private int songMinutesLeft() {
+        NowPlaying np = nowPlaying;
+        if (np == null || np.duration <= 0) return 0;
+        long left = (long) (np.duration * (1 - np.progress()));
+        return (int) Math.max(1, (left + 59_999) / 60_000);
+    }
+
+    private int sleepIndexOf(int minutes) {
+        for (int i = 0; i < SLEEP_MIN.length; i++) if (SLEEP_MIN[i] >= minutes) return i;
+        return SLEEP_MIN.length - 1;
+    }
+
+    private int sleepButton() {
+        for (int i = 0; i < lightButtons.size(); i++) if (lightButtons.get(i).key.equals("sleep")) return 3 + i;
+        return 3;
+    }
+
+    /** OK in the panel: the switch turns it on (with the marked time) or off; a time sets it and turns it on. */
+    private void sleepOk() {
+        Context ctx = getContext();
+        int[] ch = sleepChoices();
+        int pick = ch[Math.min(sleepIdx, ch.length - 1)];
+        int minutes = pick < 0 ? songMinutesLeft() : pick;
+        if (sleepRow == 0) minutes = SleepTimer.minutesLeft(ctx) > 0 ? 0 : minutes;
+        SleepTimer.set(ctx, minutes);
+        sleepSetIdx = minutes == 0 ? -1 : sleepIdx;
+        refreshTopState();
+        statusDirty = heroDirty = true;
+        click.open();
+        wake();
+    }
+
+    private void drawSleepPanel(Canvas c) {
+        float e = sleepOpen[0].value;
+        if (e <= 0.01f) return;
+        RectF btn = topRects[sleepButton()];
+        float right = CONTENT_R * k, top = topRects[3].bottom + 24 * k, w = 640 * k, h = 252 * k;
+        sleepCard.set(right - w, top, right, top + h);
+        sleepMorph.set(lerp(btn.left, sleepCard.left, e), lerp(btn.top, sleepCard.top, e),
+                lerp(btn.right, sleepCard.right, e), lerp(btn.bottom, sleepCard.bottom, e));
+        float rad = lerp(btn.height() / 2, 30 * k, Ui.clamp(e)), ge = Ui.clamp(e * 3);
+        tmp.set(sleepMorph);
+        tmp.offset(0, 18 * k);
+        shadow.setColor(Ui.alpha(0xFF000000, 0.45f * ge));
+        shadows.draw(c, tmp, rad, SHADOW_BLUR * 1.6f * k, shadow);
+        drawerGlass(c, sleepMorph, rad, 0.72f, 0x1A000000, 8 * k, ge);
+        fill.setShader(null);
+        fill.setColor(Ui.alpha(BUBBLE_FILL, ge));
+        c.drawRoundRect(sleepMorph, rad, rad, fill);
+        float te = Ui.clamp((e - 0.5f) / 0.5f);
+        if (te <= 0.01f) return;
+        if (sleepTitle == null || sleepTitle.getTextSize() != 28 * k) {
+            sleepTitle = new TextPaint(Ui.text(Ui.semibold, 28 * k, 0xFFFFFFFF));
+            sleepPill = new TextPaint(Ui.text(Ui.semibold, 19 * k, 0xFFFFFFFF));
+            sleepPill.setTextAlign(Paint.Align.CENTER);
+            sleepFoot = new TextPaint(Ui.text(Ui.medium, 20 * k, 0xCCFFFFFF));
+        }
+        c.save();
+        c.clipRect(sleepMorph);
+        float pad = 28 * k, L = sleepCard.left + pad, R = sleepCard.right - pad, T = sleepCard.top;
+        int left = SleepTimer.minutesLeft(getContext());
+        boolean on = left > 0;
+        // The switch: white when on (the knob dark), glass when off (the knob white). No colour.
+        float rowY = T + 52 * k;
+        sleepTitle.setAlpha(Math.round(255 * te));
+        c.drawText("Apagar la tele", L, rowY + Ui.halfCap(sleepTitle), sleepTitle);
+        float sw = 76 * k, sh = 40 * k, sx = R - sw;
+        tmp.set(sx, rowY - sh / 2, R, rowY + sh / 2);
+        fill.setColor(Ui.alpha(on ? 0xFFFFFFFF : 0x38FFFFFF, te));
+        c.drawRoundRect(tmp, sh / 2, sh / 2, fill);
+        float kr = sh / 2 - 4 * k, kx = on ? R - sh / 2 : sx + sh / 2;
+        fill.setColor(Ui.alpha(on ? 0xFF1C1C1E : 0xFFFFFFFF, te));
+        c.drawCircle(kx, rowY, kr, fill);
+        float f0 = Ui.clamp(sleepFocus[0].value);
+        if (f0 > 0.01f) {
+            focusRing.setStrokeWidth(3.5f * k);
+            focusRing.setColor(Ui.alpha(0xFFFFFFFF, 0.95f * f0 * te));
+            tmp.inset(-7 * k, -7 * k);
+            c.drawRoundRect(tmp, sh / 2 + 7 * k, sh / 2 + 7 * k, focusRing);
+        }
+        // The times, as pills: the one set now white, the focused one ringed.
+        int[] ch = sleepChoices();
+        float py = T + 128 * k, ph = 48 * k, gap = 8 * k, x = L;
+        for (int i = 0; i < ch.length; i++) {
+            String t = ch[i] < 0 ? "Fin del tema" : SLEEP_TEXT[i];
+            float pw = sleepPill.measureText(t) + 28 * k;
+            sleepPills[i].set(x, py - ph / 2, x + pw, py + ph / 2);
+            x += pw + gap;
+        }
+        float shift = Math.max(0, x - gap - R);   // too wide: the row slides so the focused one shows
+        for (int i = 0; i < ch.length; i++) {
+            RectF r = sleepPills[i];
+            r.offset(-shift * (sleepIdx / (float) Math.max(1, ch.length - 1)), 0);
+            boolean set = on && i == sleepSetIdx;
+            float f = Ui.clamp(sleepFocus[1 + i].value);
+            fill.setColor(Ui.alpha(set ? 0xFFFFFFFF : 0x29FFFFFF, te));
+            c.drawRoundRect(r, ph / 2, ph / 2, fill);
+            sleepPill.setColor(Ui.alpha(set ? 0xFF141414 : 0xFFFFFFFF, te));
+            c.drawText(ch[i] < 0 ? "Fin del tema" : SLEEP_TEXT[i], r.centerX(), r.centerY() + Ui.halfCap(sleepPill), sleepPill);
+            if (f > 0.01f) {
+                focusRing.setStrokeWidth(3.5f * k);
+                focusRing.setColor(Ui.alpha(0xFFFFFFFF, 0.95f * f * te));
+                tmp.set(r);
+                tmp.inset(-6 * k, -6 * k);
+                c.drawRoundRect(tmp, ph / 2 + 6 * k, ph / 2 + 6 * k, focusRing);
+            }
+        }
+        // What it will do.
+        String foot;
+        if (on) {
+            String at = new java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
+                    .format(new java.util.Date(System.currentTimeMillis() + left * 60_000L));
+            foot = "Se apaga a las " + at + "  ·  quedan " + left + " min";
+        } else {
+            foot = "Desactivado  ·  elegí un tiempo";
+        }
+        sleepFoot.setAlpha(Math.round(204 * te));
+        c.drawText(foot, L, T + 210 * k, sleepFoot);
+        c.restore();
+    }
+
     private boolean wifiOn = true;
     private int sleepLeft;
     private TextPaint badge;
@@ -5560,12 +5723,12 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             case "wifi":
                 i = new android.content.Intent(android.provider.Settings.ACTION_WIFI_SETTINGS);
                 break;
-            case "sleep": {
-                int next = SleepTimer.next(ctx);
-                SleepTimer.set(ctx, next);
-                refreshTopState();
-                statusDirty = true;
-                showToast(next == 0 ? "Temporizador apagado" : "La tele se apaga en " + next + " min");
+            case "sleep": {   // its panel drops down from the button
+                zone = Z_SLEEP;
+                sleepRow = 1;
+                sleepIdx = Math.max(0, sleepIndexOf(SleepTimer.minutesLeft(ctx)));
+                sleepSetIdx = SleepTimer.minutesLeft(ctx) > 0 ? sleepIdx : -1;   // the running time shows white
+                retarget(false);
                 click.open();
                 wake();
                 return true;
@@ -5743,6 +5906,27 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                     return true;
                 }
                 break;
+            case Z_SLEEP: {
+                int n = sleepChoices().length;
+                if (sleepRow == 1 && dx != 0) {
+                    int next = Math.max(0, Math.min(n - 1, sleepIdx + dx));
+                    if (next == sleepIdx) return true;
+                    sleepIdx = next;
+                } else if (dx != 0) {
+                    return true;
+                } else if (dy < 0) {
+                    if (sleepRow == 1) sleepRow = 0;
+                    else {
+                        zone = Z_TOP;
+                        topIndex = sleepButton();
+                    }
+                } else if (sleepRow == 0) {
+                    sleepRow = 1;
+                } else {
+                    zone = Z_SHELF;
+                }
+                break;
+            }
             case Z_PLAYER_BAR:
                 if (dx != 0) {
                     scrub(dx);   // the playhead moves; the focus stays on the bar
