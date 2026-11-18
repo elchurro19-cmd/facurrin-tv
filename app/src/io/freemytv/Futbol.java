@@ -460,6 +460,13 @@ final class Futbol {
         return out;
     }
 
+    /** One line for a label: "Racing vs Boca · 21:30" (the score and the minute while it's played). */
+    static String oneLine(Match m) {
+        boolean scored = m.live() || m.done();
+        return m.home.shortName + (scored ? "  " + score(m) + "  " : " vs ") + m.away.shortName + "  ·  "
+                + status(m, System.currentTimeMillis());
+    }
+
     static void drawLine(android.graphics.Canvas c, Match m, android.graphics.Paint text, int statusColor, float x, float base, int align) {
         boolean scored = m.live() || m.done();
         String line = m.home.shortName + (scored ? "  " + score(m) + "  " : "  vs  ") + m.away.shortName;

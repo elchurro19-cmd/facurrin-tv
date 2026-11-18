@@ -1270,7 +1270,17 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         boolean heroMoving = heroFocus.step(dt);
         boolean topMoving = step(topFocus, dt) | step(playerFocus, dt) | step(avatarFocus, dt) | step(npExpand, dt) | step(ctrlFocus, dt) | step(ctrlShow, dt) | step(npOpen, dt) | step(npFull, dt) | step(barFocus, dt), cardsMoving = step(cardFocus, dt) | step(recentFocus, dt);
         if (topMoving) placeWatch();   // the island fades out while the player opens in its place
-        boolean watchMoving = step(watchFocus, dt), watchFading = step(watchShow, dt) | step(watchActive, dt);
+        boolean watchMoving = step(watchFocus, dt) | step(actFocus, dt);
+        boolean watchFading = step(watchShow, dt) | step(watchActive, dt) | step(bubbleShow, dt);
+        // The shelf's hint (passing over an app) and the content background (resting on it).
+        hintShow[0].target = !sheetOpen && zone == Z_SHELF && drawer.value < 0.02f && watchShown() ? 1 : 0;
+        boolean hintMoving = step(hintShow, dt), artMoving = step(artShow, dt);
+        if (hintMoving) heroLayer.invalidate();
+        if (artMoving) {
+            sky.invalidate();
+            heroLayer.invalidate();
+        }
+        watchFading |= hintMoving | artMoving;   // keeps the frames coming while they move
         if (watchSwap && watchShow[0].value < 0.03f) showWatch(watchWaiting);   // the old one faded: the new one comes in
         if (topMoving) status.invalidate();
         heroMoving |= topMoving | cardsMoving;
@@ -1357,11 +1367,12 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     /** The island's fade and rise, and the drawer's lift, as the layer's alpha and position (nothing redrawn). */
     private void placeWatch() {
-        float show = Ui.clamp(watchShow[0].value), eased = show * show * (3 - 2 * show);
+        // Glass edition: the bubble shows only while the focus is up in it (↑ from the app), rising from the shelf.
+        float show = Ui.clamp(watchShow[0].value) * Ui.clamp(bubbleShow[0].value), eased = show * show * (3 - 2 * show);
         float d = drawer.value, top = (1 - Ui.clamp(sheet.value)) * (1 - smoothstep(0, 0.32f, Ui.clamp(d)));
-        float alpha = watch == null ? 0 : top * eased * (0.8f + 0.2f * Ui.clamp(watchActive[0].value));
+        float alpha = watch == null ? 0 : top * eased;
         alpha *= 1 - Ui.clamp(npOpen[0].value);
-        show(watchLayer, alpha, -d * SHIFT * k + (1 - eased) * 14 * k);
+        show(watchLayer, alpha, -d * SHIFT * k + (1 - eased) * 26 * k);
     }
 
     private static void show(View v, float alpha, float translationY) {
@@ -2700,8 +2711,13 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         boolean topChanged = aim(topFocus, !sheetOpen && zone == Z_TOP ? topIndex : -1, snap);
         heroChanged |= aim(cardFocus, !sheetOpen && zone == Z_CARDS ? cardIndex : -1, snap) | topChanged;
         heroChanged |= aim(recentFocus, !sheetOpen && zone == Z_RECENT ? recentIndex : -1, snap);
-        heroChanged |= aim(watchFocus, !sheetOpen && zone == Z_WATCH ? watchIndex : -1, snap);
-        heroChanged |= aim(watchActive, !sheetOpen && zone == Z_WATCH ? 0 : -1, snap);
+        boolean inBubble = !sheetOpen && zone == Z_WATCH;
+        heroChanged |= aim(watchFocus, inBubble && watchRow == 0 ? watchIndex : -1, snap);
+        heroChanged |= aim(actFocus, inBubble && watchRow == 1 ? actIndex : -1, snap);
+        heroChanged |= aim(watchActive, inBubble ? 0 : -1, snap);
+        heroChanged |= aim(bubbleShow, inBubble ? 0 : -1, snap);
+        if (zone != Z_SHELF && zone != Z_WATCH) artShow[0].target = 0;   // the content background is the shelf's
+        if (zone == Z_SHELF) heroChanged = true;   // the hint follows the focused app
         followWatch();
         statusChanged |= aim(playerFocus, !sheetOpen && zone == Z_PLAYER ? 0 : -1, snap);
         statusChanged |= aim(avatarFocus, !sheetOpen && zone == Z_AVATAR ? 0 : -1, snap);
@@ -3357,6 +3373,23 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             }
             click.open();
             return;
+        } else if (zone == Z_WATCH && watchRow == 1) {
+            // The bubble's actions: open the app, move it on the shelf, its info.
+            if (shelf.isEmpty() || shelfIndex >= shelf.size()) return;
+            HomeApps.Item app = shelf.get(shelfIndex);
+            if (actIndex == 1) {
+                zone = Z_SHELF;
+                retarget(false);
+                startReorder();
+                return;
+            }
+            if (actIndex == 2) {
+                click.open();
+                appAction("Información", app.pkg);
+                return;
+            }
+            it = app;
+            r = tileRects[shelfIndex];
         } else if (zone == Z_WATCH) {
             if (watch == null || watchIndex >= watch.items.size()) return;
             WatchNext.Entry e = watch.items.get(watchIndex);
@@ -3955,6 +3988,15 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         if (bgTo != null) drawLightImage(c, bgTo, fading ? e : 1);
         imagePaint.setColorFilter(null);
         if (bgTo != null || bgFrom != null) drawGrain(c);   // only a photo background has steps left to break up
+        // Glass edition: resting on an app, its latest content washes over the background, blurred and darkened.
+        float ae = Ui.clamp(artShow[0].value);
+        if (ae > 0.01f && artBlur != null) {
+            artPaint.setAlpha(Math.round(255 * ae));
+            c.drawBitmap(artBlur, null, screen, artPaint);
+            fill.setShader(null);
+            fill.setColor(Ui.alpha(0xFF000000, 0.42f * ae));
+            c.drawRect(screen, fill);
+        }
     }
 
     private void drawLightImage(Canvas c, Backdrop b, float alpha) {
@@ -3967,6 +4009,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         if (!picksOn()) {
             drawClock(c);
             if (Prefs.futbol()) drawFutbolRow(c);
+            drawShelfHint(c);
             drawNpCard(c);
             return;
         }
@@ -4065,8 +4108,15 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
         gClock.setColor(ink);
         c.drawText(clockText, x - Ui.leftBearing(gClock, clockText), G_CLOCK_BASE * k, gClock);
+        // Resting on an app, what you last saw or heard there takes the weather's place.
+        float ae = Ui.clamp(artShow[0].value), wa = 1 - ae;
+        // Up in the bubble, it shows the same: the title under the clock steps aside (the weather stays hidden).
+        float te = ae * (1 - Ui.clamp(bubbleShow[0].value));
+        if (te > 0.01f) drawArtText(c, te);
         HomeData.Weather wx = data.weather;
-        if (!Prefs.weather() || Double.isNaN(wx.temp)) return;
+        if (wa <= 0.01f || !Prefs.weather() || Double.isNaN(wx.temp)) return;
+        ink = Ui.alpha(ink, wa);
+        dim = Ui.alpha(dim, wa);
         refreshGlassWeather(wx);
         // Now: the condition's symbol, the temperature big, and beside it the condition over the high and the low.
         base = G_TEMP_BASE * k;
@@ -4089,7 +4139,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         for (int i = 0; i < gHourText.length; i++) {
             float hx = x + i * col;
             fill.setShader(null);
-            fill.setColor(Ui.alpha(ink, 0.25f));
+            fill.setColor(Ui.alpha(ink, 0.25f));   // ink already carries the fade
             c.drawRect(hx, hb - 28 * k, hx + 2 * k, hb + 6 * k, fill);
             float px = hx + 14 * k;
             gHour.setColor(dim);
@@ -4241,13 +4291,137 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     // MARK: - "Continuar viendo" (centre right, for the focused app of the shelf)
 
     private static final long WATCH_DEBOUNCE_MS = 220;
-    // Glass edition: the island as big as the music player that opens in its place, beside the clock (was 22, 38, 54;
-    // 188, 16, 106; centre 540).
-    private static final float WATCH_PAD = 30, WATCH_HEADER = 48, WATCH_TOP = 70;
-    // Every app gets the same island: up to three cards (the latest three to resume, seen or heard).
-    private static final float WATCH_COL = 300, WATCH_COL_GAP = 26, WATCH_THUMB_H = 168;
-    /** Vertical centre: beside the clock, between the buttons at the top and the shelf. */
-    private static final float WATCH_CY = 452;
+    // Glass edition: a bubble that rises from the focused app when you press ↑ (passing over the apps only shows a hint,
+    // and resting on one turns the background into what you last saw or heard there). Up to three cards (the latest
+    // three to resume) and a row of actions: open the app, move it, its info.
+    private static final float WATCH_PAD = 22, WATCH_HEADER = 36, WATCH_TOP = 50;
+    private static final float WATCH_COL = 200, WATCH_COL_GAP = 16, WATCH_THUMB_H = 104;
+    /** Below the cards: their text, then the actions row; the arrow under the bubble points at the app. */
+    private static final float WATCH_BELOW = 130, WATCH_ARROW = 16;
+    private final RectF[] actRects = {new RectF(), new RectF(), new RectF()};
+    private final String[] actText = new String[3];
+    private final Spring[] actFocus = {new Spring(0.32f, 0.8f, 0), new Spring(0.32f, 0.8f, 0), new Spring(0.32f, 0.8f, 0)};
+    /** 0 = the cards, 1 = the actions row. */
+    private int watchRow, actIndex;
+    private float watchArrowX;
+    private TextPaint actPaint;
+    private final Spring[] bubbleShow = {new Spring(0.3f, 0.8f, 0)};
+
+    // The hint over the focused app ("↑ Más de Spotify") and, after a second's rest on it, the background turning into
+    // the latest thing seen or heard there, with its title under the clock (where the weather was).
+    private final Spring[] hintShow = {new Spring(0.3f, 0.85f, 0)};
+    private final Spring[] artShow = {new Spring(0.2f, 0.95f, 0)};
+    private static final long ART_REST_MS = 1000;
+    private final Runnable artRest = this::restOnApp;
+    private int artTries;
+    private Bitmap artBlur;
+    private String artKey = "", artLabel = "", artTitle = "", artSub = "", hintText = "", hintPkg = "";
+    private float artProgress;
+    private int artColor = 0xFFFFFFFF;
+    private final Paint artPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+    private TextPaint artLabelP, artTitleP, artSubP, hintP;
+
+    /** A second on the same app: its latest content takes the background (tried again shortly while it loads). */
+    private void restOnApp() {
+        if (!running || zone != Z_SHELF || watchPkg == null) return;
+        WatchNext.Content c = watch;
+        boolean ready = c != null && !watchSwap && watchPkg.equals(c.pkg) && !c.items.isEmpty();
+        WatchNext.Entry e = ready ? c.items.get(0) : null;
+        if (e == null || (e.bitmap == null && artTries < 4)) {
+            if (++artTries < 8) handler.postDelayed(artRest, 300);
+            return;
+        }
+        String key = c.pkg + "|" + e.title;
+        if (!key.equals(artKey)) {
+            artKey = key;
+            artBlur = blurOf(e.bitmap);
+            String h = c.header == null ? "" : c.header, app = shelfLabel(c.pkg).toUpperCase(Ui.locale());
+            artLabel = h.startsWith("ESCUCHADO") ? "SEGUÍ ESCUCHANDO EN " + app
+                    : h.startsWith("CONTINUAR") || h.startsWith("SEGUIR") || h.startsWith("VISTOS") ? "SEGUÍ VIENDO EN " + app
+                    : h;
+            if (artTitleP == null) {
+                artLabelP = new TextPaint(Ui.text(Ui.semibold, 20 * k, 0xD9FFFFFF));
+                artLabelP.setLetterSpacing(0.12f);
+                artTitleP = new TextPaint(Ui.text(Ui.displaySemibold, 46 * k, 0xFFFFFFFF));
+                artSubP = new TextPaint(Ui.text(Ui.medium, 24 * k, 0xD9FFFFFF));
+                for (Paint p : new Paint[] {artLabelP, artTitleP, artSubP}) p.setShadowLayer(12 * k, 0, 2 * k, 0x80000000);
+            }
+            float room = 640 * k;
+            artTitle = TextUtils.ellipsize(e.title, artTitleP, room, TextUtils.TruncateAt.END).toString();
+            String sub = e.sub == null ? "" : e.sub;
+            artSub = TextUtils.ellipsize(sub + (sub.isEmpty() ? "" : "  ·  ") + "↑ para elegir", artSubP, room,
+                    TextUtils.TruncateAt.END).toString();
+            artProgress = e.duration > 0 && e.position > 0 ? Ui.clamp(e.position / (float) e.duration) : 0;
+            int brand = HomeApps.brandColor(c.pkg);
+            artColor = brand != 0 ? brand : 0xFFFFFFFF;
+        }
+        artShow[0].target = 1;
+        wake();
+    }
+
+    /** The picture, centre-cropped to 16:9 and blurred by shrinking it to almost nothing (drawn filtered, full screen). */
+    private static Bitmap blurOf(Bitmap b) {
+        if (b == null || b.getWidth() < 2 || b.getHeight() < 2) return null;
+        try {
+            Bitmap src = b.getConfig() == Bitmap.Config.HARDWARE ? b.copy(Bitmap.Config.ARGB_8888, false) : b;
+            int w = src.getWidth(), h = src.getHeight(), cw = w, ch = Math.round(w * 9f / 16);
+            if (ch > h) {
+                ch = h;
+                cw = Math.round(h * 16f / 9);
+            }
+            Bitmap crop = Bitmap.createBitmap(src, (w - cw) / 2, (h - ch) / 2, cw, ch);
+            Bitmap tiny = Bitmap.createScaledBitmap(crop, 32, 18, true);
+            return Bitmap.createScaledBitmap(tiny, 160, 90, true);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** Over the focused app: "↑ Más de <app>", a small glass pill with a dot of the app's colour. */
+    private void drawShelfHint(Canvas c) {
+        float hv = Ui.clamp(hintShow[0].value);
+        WatchNext.Content wc = watch;
+        if (hv <= 0.01f || wc == null || shelfIndex >= tileRects.length || shelfIndex >= shelf.size()) return;
+        if (hintP == null) hintP = new TextPaint(Ui.text(Ui.semibold, 20 * k, 0xF2FFFFFF));
+        if (!wc.pkg.equals(hintPkg)) {
+            hintPkg = wc.pkg;
+            hintText = "↑   Más de " + shelfLabel(wc.pkg);
+        }
+        float eased = hv * hv * (3 - 2 * hv), dot = 10 * k;
+        float pw = hintP.measureText(hintText) + 54 * k, ph = 42 * k;
+        float cx = Math.max(MARGIN * k + pw / 2, Math.min(CONTENT_R * k - pw / 2, tileRects[shelfIndex].centerX()));
+        float bottom = (L_PLATTER_TOP - 14) * k + (1 - eased) * 10 * k;
+        tmp.set(cx - pw / 2, bottom - ph, cx + pw / 2, bottom);
+        scene.glass(c, tmp, ph / 2, 0xFFFFFFFF, 0.6f, 0, 0, 0.02f, 1, eased);
+        int brand = HomeApps.brandColor(wc.pkg);
+        fill.setShader(null);
+        fill.setColor(Ui.alpha(brand != 0 ? brand : 0xFFFFFFFF, eased));
+        c.drawCircle(tmp.left + 20 * k, tmp.centerY(), dot / 2, fill);
+        hintP.setAlpha(Math.round(242 * eased));
+        c.drawText(hintText, tmp.left + 34 * k, tmp.centerY() + Ui.halfCap(hintP), hintP);
+    }
+
+    /** Under the clock, while the background shows it: what you last saw or heard there, and how far you got. */
+    private void drawArtText(Canvas c, float ae) {
+        if (artTitleP == null || artTitle.isEmpty()) return;
+        float x = G_LEFT * k, base = (G_TEMP_BASE - 34) * k;
+        artLabelP.setAlpha(Math.round(217 * ae));
+        c.drawText(artLabel, x, base, artLabelP);
+        artTitleP.setAlpha(Math.round(255 * ae));
+        c.drawText(artTitle, x - Ui.leftBearing(artTitleP, artTitle), base + 58 * k, artTitleP);
+        artSubP.setAlpha(Math.round(217 * ae));
+        c.drawText(artSub, x, base + 98 * k, artSubP);
+        if (artProgress > 0) {   // how far you got, in the app's colour
+            float bw = 320 * k, bh = 6 * k, by = base + 124 * k;
+            fill.setShader(null);
+            fill.setColor(Ui.alpha(0x59FFFFFF, ae));
+            tmp.set(x, by, x + bw, by + bh);
+            c.drawRoundRect(tmp, bh / 2, bh / 2, fill);
+            fill.setColor(Ui.alpha(artColor, ae));
+            tmp.right = x + Math.max(bh, bw * artProgress);
+            c.drawRoundRect(tmp, bh / 2, bh / 2, fill);
+        }
+    }
     private WatchNext.Content watch, watchWaiting;
     private boolean watchSwap;
     /** The app it follows: the focused shelf app (kept while the focus is up in the widget or the top row). */
@@ -4300,6 +4474,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
         if (pkg == null ? watchPkg == null : pkg.equals(watchPkg)) return;
         watchPkg = pkg;
+        // Another app: the content background goes, and comes back after a second's rest on this one.
+        handler.removeCallbacks(artRest);
+        artShow[0].target = 0;
+        artTries = 0;
+        if (pkg != null) handler.postDelayed(artRest, ART_REST_MS);
         handler.removeCallbacks(watchDebounce);
         if (pkg == null) pickWatch();
         else handler.postDelayed(watchDebounce, WATCH_DEBOUNCE_MS);
@@ -4387,17 +4566,23 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private void layoutWatch() {
         WatchNext.Content c = watch;
         if (c == null) return;
-        if (watchHead == null || watchHead.getTextSize() != 20 * k) {
-            watchHead = new TextPaint(Ui.text(Ui.semibold, 20 * k, 0xB3FFFFFF));
+        if (watchHead == null || watchHead.getTextSize() != 18 * k) {
+            watchHead = new TextPaint(Ui.text(Ui.semibold, 18 * k, 0xB3FFFFFF));
             watchHead.setLetterSpacing(0.1f);
-            watchTitle = new TextPaint(Ui.text(Ui.semibold, 24 * k, 0xF2FFFFFF));
-            watchSub = new TextPaint(Ui.text(Ui.medium, 19 * k, 0xADFFFFFF));
+            watchTitle = new TextPaint(Ui.text(Ui.semibold, 21 * k, 0xF2FFFFFF));
+            watchSub = new TextPaint(Ui.text(Ui.medium, 17 * k, 0xADFFFFFF));
+            actPaint = new TextPaint(Ui.text(Ui.semibold, 19 * k, 0xF2FFFFFF));
         }
-        float right = CONTENT_R * k, pad = WATCH_PAD * k, col = WATCH_COL * k, gap = WATCH_COL_GAP * k;
-        // Always three columns wide, however many cards: every app's island is the same size.
+        float pad = WATCH_PAD * k, col = WATCH_COL * k, gap = WATCH_COL_GAP * k;
+        // Always three columns wide, however many cards: every app's bubble is the same size.
         float w = Math.max(3 * col + 2 * gap, watchHead.measureText(c.header)) + 2 * pad;
-        float h = (WATCH_TOP + WATCH_THUMB_H + 92) * k, t = WATCH_THUMB_H * k;
-        watchCard.set(right - w, WATCH_CY * k - h / 2, right, WATCH_CY * k + h / 2);
+        float h = (WATCH_TOP + WATCH_THUMB_H + WATCH_BELOW) * k, t = WATCH_THUMB_H * k;
+        // Over the app it belongs to, its arrow pointing at it; kept on screen at the ends of the shelf.
+        float cx = shelfIndex < tileRects.length && shelfIndex < shelf.size() ? tileRects[shelfIndex].centerX() : CONTENT_R * k - w / 2;
+        float bl = Math.max(MARGIN * k * 0.75f, Math.min(CONTENT_R * k - w, cx - w / 2));
+        float bottom = (L_PLATTER_TOP - WATCH_ARROW - 12) * k;
+        watchCard.set(bl, bottom - h, bl + w, bottom);
+        watchArrowX = Math.max(bl + 44 * k, Math.min(bl + w - 44 * k, cx));
         int brand = HomeApps.brandColor(c.pkg);
         watchColor = brand != 0 ? brand : 0xFFFFFFFF;
         // Fewer than three cards (Netflix shares two): centred in the island, the heading over the first one.
@@ -4420,6 +4605,16 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             watchTitles[i] = TextUtils.ellipsize(e.title, watchTitle, col, TextUtils.TruncateAt.END).toString();
             watchSubs[i] = TextUtils.ellipsize(sub, watchSub, col, TextUtils.TruncateAt.END).toString();
         }
+        // The actions, as pills under the cards' text.
+        actText[0] = "Abrir " + shelfLabel(c.pkg);
+        actText[1] = "Mover";
+        actText[2] = "Información";
+        float ax = watchCard.left + pad, ay = watchCard.top + (WATCH_TOP + WATCH_THUMB_H + 70) * k, ah = 42 * k;
+        for (int i = 0; i < 3; i++) {
+            float aw = actPaint.measureText(actText[i]) + 44 * k;
+            actRects[i].set(ax, ay, ax + aw, ay + ah);
+            ax += aw + 12 * k;
+        }
         watchDirty = true;
     }
 
@@ -4428,7 +4623,26 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         if (wc == null) return;
         float eased = 1, a = 1;   // the layer's alpha fades it (placeWatch)
         c.save();
-        drawerGlass(c, watchCard, 40 * k, 0.72f, 0x1A000000, 10 * k, 1);
+        // The bubble: glass with a wash of the app's colour, and an arrow under it pointing at the app.
+        tmp.set(watchCard);
+        tmp.offset(0, 18 * k);
+        shadow.setColor(Ui.alpha(0xFF000000, 0.4f));
+        shadows.draw(c, tmp, 30 * k, SHADOW_BLUR * 1.6f * k, shadow);
+        drawerGlass(c, watchCard, 30 * k, 0.72f, 0x1A000000, 8 * k, 1);
+        if (watchColor != 0xFFFFFFFF) {
+            fill.setShader(null);
+            fill.setColor(Ui.alpha(watchColor, 0.16f));
+            c.drawRoundRect(watchCard, 30 * k, 30 * k, fill);
+        }
+        glyphPath.reset();
+        float ab = watchCard.bottom - 1 * k, aw = 16 * k;
+        glyphPath.moveTo(watchArrowX - aw, ab);
+        glyphPath.lineTo(watchArrowX, ab + WATCH_ARROW * k);
+        glyphPath.lineTo(watchArrowX + aw, ab);
+        glyphPath.close();
+        fill.setShader(null);
+        fill.setColor(0xB02A2A30);
+        c.drawPath(glyphPath, fill);
         watchHead.setColor(Ui.alpha(tone(L_DIM, 0xB3FFFFFF), a));
         c.drawText(wc.header, watchHeadX, watchCard.top + WATCH_HEADER * k, watchHead);
         int ink = tone(L_INK, 0xFFFFFFFF), dim = tone(L_DIM, 0xADFFFFFF);
@@ -4466,15 +4680,35 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 tx += WATCH_COL * k / 2;
                 align = Paint.Align.CENTER;
             }
-            float base = r.bottom + 40 * k;
+            float base = r.bottom + 32 * k;
             watchTitle.setTextAlign(align);
             watchSub.setTextAlign(align);
             watchTitle.setColor(Ui.alpha(ink, (0.85f + 0.15f * f) * a));
             c.drawText(watchTitles[i], tx, base, watchTitle);
             watchSub.setColor(Ui.alpha(dim, a));
-            c.drawText(watchSubs[i], tx, base + 30 * k, watchSub);
+            c.drawText(watchSubs[i], tx, base + 26 * k, watchSub);
             watchTitle.setTextAlign(Paint.Align.LEFT);
             watchSub.setTextAlign(Paint.Align.LEFT);
+        }
+        // The actions: glass pills; the focused one white with dark text.
+        for (int i = 0; i < 3; i++) {
+            RectF r = actRects[i];
+            if (actText[i] == null) continue;
+            float f = Ui.clamp(actFocus[i].value), rr = r.height() / 2;
+            fill.setShader(null);
+            fill.setColor(blend(0x26FFFFFF, 0xFFFFFFFF, f));
+            c.drawRoundRect(r, rr, rr, fill);
+            if (f < 0.99f) {
+                if (watchRim == null) {
+                    watchRim = new Paint(Paint.ANTI_ALIAS_FLAG);
+                    watchRim.setStyle(Paint.Style.STROKE);
+                }
+                watchRim.setStrokeWidth(1.5f * k);
+                watchRim.setColor(Ui.alpha(0x59FFFFFF, 1 - f));
+                c.drawRoundRect(r, rr, rr, watchRim);
+            }
+            actPaint.setColor(blend(0xF2FFFFFF, 0xFF141414, f));
+            c.drawText(actText[i], r.left + 22 * k, r.centerY() + Ui.halfCap(actPaint), actPaint);
         }
         c.restore();
     }
@@ -5146,6 +5380,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                     blend(tone(L_INK, 0xEBFFFFFF), L_INK, f));
             if (f > 0.01f) {
                 String label = lightButtons.get(i).label;
+                if (i == 0) label += liveTvMatch();   // Glass edition: TV en vivo names today's game
                 float half = lTip.measureText(label) / 2;
                 float x = Math.min(r.centerX(), CONTENT_R * k - half);
                 lTip.setAlpha(Math.round(255 * f));
@@ -5154,14 +5389,39 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
     }
 
+    private String liveTvText = "";
+    private long liveTvMinute = -1;
+
+    /** "  ·  Racing vs Boca · 21:30" while a game is on or starts within 12 hours (made once a minute). */
+    private String liveTvMatch() {
+        long now = System.currentTimeMillis(), minute = now / 60_000;
+        if (minute == liveTvMinute) return liveTvText;
+        liveTvMinute = minute;
+        liveTvText = "";
+        if (Prefs.futbol()) {
+            List<Futbol.Match> shown = Futbol.shownNow(data.matches, now);
+            if (!shown.isEmpty()) {
+                Futbol.Match m = shown.get(0);
+                if (m.live() || m.kickedOff(now) || (!m.done() && m.start - now < 12 * 3_600_000L)) {
+                    liveTvText = "  ·  " + Futbol.oneLine(m);
+                }
+            }
+        }
+        return liveTvText;
+    }
+
     private boolean moveLight(int dx, int dy) {
         switch (zone) {
             case Z_SHELF:
                 // Up from an empty shelf too: move()'s older zones (the hero, the corner capsule) aren't drawn any more.
                 if (dy >= 0) return false;
                 if (watchShown()) {
-                    zone = Z_WATCH;
+                    zone = Z_WATCH;   // the bubble rises from the app, on its first card
                     watchIndex = 0;
+                    watchRow = 0;
+                    actIndex = 0;
+                    layoutWatch();
+                    placeWatch();
                 } else if (cards.isEmpty() && recentShown()) {
                     zone = Z_RECENT;
                     recentIndex = nearest(recentRects, recent.size(), shelf.isEmpty() ? w / 2f : tileRects[shelfIndex].centerX());
@@ -5187,13 +5447,24 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 }
                 break;
             case Z_WATCH:
-                if (dx != 0) {
-                    int next = Math.max(0, Math.min(watch.items.size() - 1, watchIndex + dx));
+                if (dx != 0 && watchRow == 1) {
+                    int next = Math.max(0, Math.min(2, actIndex + dx));
+                    if (next == actIndex) return true;
+                    actIndex = next;
+                } else if (dx != 0) {
+                    int next = Math.max(0, Math.min(Math.min(3, watch.items.size()) - 1, watchIndex + dx));
                     if (next == watchIndex) return true;
                     watchIndex = next;
                 } else if (dy < 0) {
-                    zone = Z_TOP;
-                    topIndex = 3;
+                    if (watchRow == 1) {
+                        watchRow = 0;   // back up to the cards
+                    } else {
+                        zone = Z_TOP;
+                        topIndex = 3;
+                    }
+                } else if (watchRow == 0) {
+                    watchRow = 1;   // down to the actions, on "Abrir"
+                    actIndex = 0;
                 } else {
                     zone = Z_SHELF;
                 }
