@@ -808,7 +808,7 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
     // MARK: - Glass edition: "Ahora suena" (option P2). While music plays, the screensaver is the song: its cover big
     // over its own colours blurred, the title, the home's progress bar, and the controls (← → move, OK presses).
 
-    private static final int MC_SHUFFLE = 0, MC_PREV = 1, MC_PLAY = 2, MC_NEXT = 3, MC_REPEAT = 4;
+    private static final int MC_SHUFFLE = 0, MC_PREV = 1, MC_PLAY = 2, MC_NEXT = 3, MC_REPEAT = 4, MC_MOON = 5;
     private int musicFocus = MC_PLAY, musicVersion = -1;
     private float musicShow;
     private Bitmap musicBlur;
@@ -856,36 +856,54 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
         return np != null && np.playingVisible();
     }
 
-    /** The song's keys: ← → between the controls, OK presses the focused one. Back (and the rest) end it as before. */
+    /**
+     * The song's keys. Light (M1): ← → between the controls and the moon, OK presses the focused one (the moon turns
+     * it dark). Dark (M3): OK plays or pauses, ← → change the song, ↑ or ↓ bring the light back. Back ends it as before.
+     */
     private boolean musicKey(android.view.KeyEvent e) {
         int code = e.getKeyCode();
         NowPlaying np = nowPlaying;
+        boolean ok = code == android.view.KeyEvent.KEYCODE_DPAD_CENTER || code == android.view.KeyEvent.KEYCODE_ENTER
+                || code == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER;
+        if (darkNow) {
+            if (ok) np.toggle();
+            else if (code == android.view.KeyEvent.KEYCODE_DPAD_LEFT) np.previous();
+            else if (code == android.view.KeyEvent.KEYCODE_DPAD_RIGHT) np.next();
+            else if (code == android.view.KeyEvent.KEYCODE_DPAD_UP || code == android.view.KeyEvent.KEYCODE_DPAD_DOWN) {
+                darkNow = false;
+                setDark(getContext(), false);
+                musicFocus = MC_MOON;
+            } else return false;
+            invalidate();
+            return true;
+        }
         switch (code) {
             case android.view.KeyEvent.KEYCODE_DPAD_LEFT:
             case android.view.KeyEvent.KEYCODE_DPAD_RIGHT: {
                 int d = code == android.view.KeyEvent.KEYCODE_DPAD_RIGHT ? 1 : -1, next = musicFocus;
                 do {
                     next += d;
-                } while (next >= 0 && next <= MC_REPEAT && !musicHas(np, next));
-                if (next >= 0 && next <= MC_REPEAT) musicFocus = next;
+                } while (next >= 0 && next <= MC_MOON && !musicHas(np, next));
+                if (next >= 0 && next <= MC_MOON) musicFocus = next;
                 break;
             }
-            case android.view.KeyEvent.KEYCODE_DPAD_CENTER:
-            case android.view.KeyEvent.KEYCODE_ENTER:
-            case android.view.KeyEvent.KEYCODE_NUMPAD_ENTER:
+            case android.view.KeyEvent.KEYCODE_DPAD_UP:
+            case android.view.KeyEvent.KEYCODE_DPAD_DOWN:
+                break;   // nothing to move to: kept, so they don't end the screensaver
+            default:
+                if (!ok) return false;
                 switch (musicFocus) {
                     case MC_SHUFFLE: np.shuffle(); break;
                     case MC_PREV: np.previous(); break;
                     case MC_NEXT: np.next(); break;
                     case MC_REPEAT: np.repeat(); break;
+                    case MC_MOON:
+                        darkNow = true;
+                        setDark(getContext(), true);
+                        musicFocus = MC_PLAY;
+                        break;
                     default: np.toggle();
                 }
-                break;
-            case android.view.KeyEvent.KEYCODE_DPAD_UP:
-            case android.view.KeyEvent.KEYCODE_DPAD_DOWN:
-                break;   // nothing to move to: kept, so they don't end the screensaver
-            default:
-                return false;
         }
         invalidate();
         return true;
@@ -896,6 +914,8 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
         if (which == MC_REPEAT) return np != null && np.canRepeat();
         return true;
     }
+
+    private android.text.TextPaint mClock, mDate, mDim, mHint;
 
     private void drawMusicScreen(Canvas c) {
         boolean on = musicOn();
@@ -912,14 +932,54 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
             musicAccent = HomeView.coverColor(np.art);
         }
         if (mTitle == null) {
-            mTitle = new android.text.TextPaint(Ui.text(Ui.displaySemibold, 76 * k, 0xFFFFFFFF));
-            mArtist = new android.text.TextPaint(Ui.text(Ui.medium, 40 * k, 0xD9FFFFFF));
-            mLabel = new android.text.TextPaint(Ui.text(Ui.semibold, 24 * k, 0xBFFFFFFF));
+            mTitle = new android.text.TextPaint(Ui.text(Ui.displaySemibold, 64 * k, 0xFFFFFFFF));
+            mArtist = new android.text.TextPaint(Ui.text(Ui.medium, 36 * k, 0xD9FFFFFF));
+            mLabel = new android.text.TextPaint(Ui.text(Ui.semibold, 22 * k, 0xBFFFFFFF));
             mLabel.setLetterSpacing(0.12f);
-            mTime = new android.text.TextPaint(Ui.numbers(Ui.medium, 26 * k, 0xCCFFFFFF));
+            mTime = new android.text.TextPaint(Ui.numbers(Ui.medium, 24 * k, 0xCCFFFFFF));
+            mClock = new android.text.TextPaint(Ui.numbers(Ui.stadium, 300 * k, 0xFFFFFFFF));
+            mDate = new android.text.TextPaint(Ui.text(Ui.semibold, 30 * k, 0xE6FFFFFF));
+            mDate.setLetterSpacing(0.16f);
+            mDim = new android.text.TextPaint(Ui.text(Ui.medium, 30 * k, 0x99FFFFFF));
+            mHint = new android.text.TextPaint(Ui.text(Ui.medium, 22 * k, 0x66FFFFFF));
+            mHint.setTextAlign(Paint.Align.CENTER);
+            for (Paint p : new Paint[] {mClock, mDate}) p.setShadowLayer(24 * k, 0, 6 * k, 0x73000000);
             mRing.setStyle(Paint.Style.STROKE);
         }
-        // The background: the cover's colours, blurred and dimmed.
+        Bitmap art = np.artLarge != null ? np.artLarge : np.art;
+        if (darkNow) {   // M3: black, the clock big and faint, the song on one line under it
+            mFill.setShader(null);
+            mFill.setColor(Ui.alpha(0xFF000000, a));
+            c.drawRect(0, 0, w, h, mFill);
+            mClock.setTextAlign(Paint.Align.CENTER);
+            mClock.setColor(Ui.alpha(0x8CFFFFFF, a));
+            mClock.setShadowLayer(0, 0, 0, 0);
+            c.drawText(clock, w / 2f, h / 2f + Ui.cap(mClock) / 2 - 40 * k, mClock);
+            mClock.setTextAlign(Paint.Align.LEFT);
+            mClock.setShadowLayer(24 * k, 0, 6 * k, 0x73000000);
+            String line = np.title + "  ·  " + np.artist;
+            float lw = Math.min(mDim.measureText(line), w * 0.6f), cr = 26 * k, lx = (w - lw - 2 * cr - 18 * k) / 2;
+            float ly = h / 2f + Ui.cap(mClock) / 2 + 80 * k;
+            if (art != null) {
+                android.graphics.BitmapShader sh = new android.graphics.BitmapShader(art,
+                        android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP);
+                mMatrix.setScale(2 * cr / art.getWidth(), 2 * cr / art.getHeight());
+                mMatrix.postTranslate(lx, ly - cr - Ui.halfCap(mDim));
+                sh.setLocalMatrix(mMatrix);
+                mFill.setShader(sh);
+                mFill.setAlpha(Math.round(150 * a));
+                c.drawCircle(lx + cr, ly - Ui.halfCap(mDim), cr, mFill);
+                mFill.setShader(null);
+            }
+            mDim.setAlpha(Math.round(153 * a));
+            c.drawText(android.text.TextUtils.ellipsize(line, mDim, w * 0.6f, android.text.TextUtils.TruncateAt.END).toString(),
+                    lx + 2 * cr + 18 * k, ly, mDim);
+            mHint.setAlpha(Math.round(102 * a));
+            c.drawText("OK pausa  ·  ← → cambia de tema  ·  ↓ vuelve a la luz", w / 2f, h - 70 * k, mHint);
+            postInvalidateDelayed(1000);
+            return;
+        }
+        // M1. The background: the cover's colours, blurred and dimmed.
         mFill.setShader(null);
         mFill.setColor(Ui.alpha(0xFF101012, a));
         c.drawRect(0, 0, w, h, mFill);
@@ -930,17 +990,18 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
             mFill.setColor(Ui.alpha(0xFF000000, 0.4f * a));
             c.drawRect(0, 0, w, h, mFill);
         }
-        // The small clock at the top left.
-        cornerDate.setAlpha(Math.round(235 * a));
-        c.drawText(clock, 120 * k, 120 * k, cornerDate);
-        cornerDate.setAlpha(235);
-        // The cover.
-        float cs = 520 * k, cl = 160 * k, ct = (h - cs) / 2 - 20 * k;
-        mRect.set(cl, ct + 24 * k, cl + cs, ct + cs + 24 * k);
+        // The date and the clock as on the home screen: big, top left.
+        float x0 = 120 * k;
+        mDate.setAlpha(Math.round(230 * a));
+        c.drawText(date.toUpperCase(Ui.locale()), x0, 150 * k, mDate);
+        mClock.setColor(Ui.alpha(0xFFFFFFFF, a));
+        c.drawText(clock, x0 - Ui.leftBearing(mClock, clock), 150 * k + 40 * k + Ui.cap(mClock), mClock);
+        // The song underneath: the cover, the title and the artist, the progress, the controls and the moon.
+        float cs = 240 * k, cl = x0, ct = 560 * k;
+        mRect.set(cl, ct + 18 * k, cl + cs, ct + cs + 18 * k);
         mFill.setColor(Ui.alpha(0xFF000000, 0.35f * a));
-        c.drawRoundRect(mRect, 30 * k, 30 * k, mFill);
+        c.drawRoundRect(mRect, 22 * k, 22 * k, mFill);
         mRect.set(cl, ct, cl + cs, ct + cs);
-        Bitmap art = np.artLarge != null ? np.artLarge : np.art;
         if (art != null) {
             android.graphics.BitmapShader sh = new android.graphics.BitmapShader(art,
                     android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP);
@@ -949,34 +1010,31 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
             sh.setLocalMatrix(mMatrix);
             mFill.setShader(sh);
             mFill.setAlpha(Math.round(255 * a));
-            c.drawRoundRect(mRect, 30 * k, 30 * k, mFill);
+            c.drawRoundRect(mRect, 22 * k, 22 * k, mFill);
             mFill.setShader(null);
             mRing.setStrokeWidth(2 * k);   // a faint rim: a dark cover still reads against the dark
             mRing.setColor(Ui.alpha(0x40FFFFFF, a));
-            c.drawRoundRect(mRect, 30 * k, 30 * k, mRing);
+            c.drawRoundRect(mRect, 22 * k, 22 * k, mRing);
         } else {
             mFill.setColor(Ui.alpha(0x24FFFFFF, a));
-            c.drawRoundRect(mRect, 30 * k, 30 * k, mFill);
+            c.drawRoundRect(mRect, 22 * k, 22 * k, mFill);
         }
-        // The text.
-        float tx = cl + cs + 90 * k, tr = w - 160 * k, tw = tr - tx;
+        float tx = cl + cs + 50 * k, tr = w - 120 * k, tw = tr - tx;
         String app = np.pkg == null ? "" : np.pkg.contains("spotify") ? "SPOTIFY" : np.pkg.contains("youtube") ? "YOUTUBE" : "";
         mLabel.setAlpha(Math.round(191 * a));
-        c.drawText("AHORA SUENA" + (app.isEmpty() ? "" : "  ·  " + app), tx, ct + 70 * k, mLabel);
+        c.drawText("AHORA SUENA" + (app.isEmpty() ? "" : "  ·  " + app), tx, ct + 28 * k, mLabel);
         mTitle.setAlpha(Math.round(255 * a));
         c.drawText(android.text.TextUtils.ellipsize(np.title, mTitle, tw, android.text.TextUtils.TruncateAt.END).toString(),
-                tx, ct + 170 * k, mTitle);
+                tx, ct + 98 * k, mTitle);
         mArtist.setAlpha(Math.round(217 * a));
         c.drawText(android.text.TextUtils.ellipsize(np.artist, mArtist, tw, android.text.TextUtils.TruncateAt.END).toString(),
-                tx, ct + 230 * k, mArtist);
-        // The progress, as on the home's player: a thick track, what played in the song's colour with a hill of sound
-        // rolling over it, the knob, and the times.
-        float p = Ui.clamp(np.progress()), by = ct + 330 * k, bh = 14 * k, head = tx + tw * p;
+                tx, ct + 146 * k, mArtist);
+        float p = Ui.clamp(np.progress()), by = ct + 206 * k, bh = 12 * k, head = tx + tw * p;
         mFill.setColor(Ui.alpha(0x47FFFFFF, a));
         mRect.set(tx, by - bh / 2, tr, by + bh / 2);
         c.drawRoundRect(mRect, bh / 2, bh / 2, mFill);
         if (head - tx > bh) {
-            float t = SystemClock.uptimeMillis() / 1000f, span = head - tx, amp = (np.playing ? 30 : 10) * k;
+            float t = SystemClock.uptimeMillis() / 1000f, span = head - tx, amp = (np.playing ? 26 : 9) * k;
             mPath.reset();
             mPath.moveTo(tx, by);
             for (float x = tx; ; x += 5 * k) {
@@ -994,33 +1052,43 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
             c.drawRoundRect(mRect, bh / 2, bh / 2, mFill);
         }
         mFill.setColor(Ui.alpha(0xFFFAF6F2, a));
-        c.drawCircle(head, by, 17 * k, mFill);
+        c.drawCircle(head, by, 15 * k, mFill);
         String done = time(np.duration * p), total = time(np.duration);
         mTime.setAlpha(Math.round(204 * a));
-        c.drawText(done, tx, by + 52 * k, mTime);
-        c.drawText(total, tr - mTime.measureText(total), by + 52 * k, mTime);
-        // The controls: previous, play and next in a glass pill, shuffle and repeat on its sides.
-        float cy = ct + 470 * k, mid = tx + tw / 2, step = 110 * k, ph = 96 * k, pw = 2 * step + 100 * k;
+        c.drawText(done, tx, by + 44 * k, mTime);
+        c.drawText(total, tr - mTime.measureText(total), by + 44 * k, mTime);
+        // The controls: previous, play and next in a glass pill, shuffle and repeat on its sides; the moon at the end.
+        float cy = ct + 330 * k, mid = tx + 360 * k, step = 96 * k, ph = 84 * k, pw = 2 * step + 90 * k;
         mRect.set(mid - pw / 2, cy - ph / 2, mid + pw / 2, cy + ph / 2);
         mFill.setColor(Ui.alpha(0x26FFFFFF, a));
         c.drawRoundRect(mRect, ph / 2, ph / 2, mFill);
         mRing.setStrokeWidth(2 * k);
         mRing.setColor(Ui.alpha(0x66FFFFFF, a));
         c.drawRoundRect(mRect, ph / 2, ph / 2, mRing);
-        for (int i = MC_SHUFFLE; i <= MC_REPEAT; i++) {
+        for (int i = MC_SHUFFLE; i <= MC_MOON; i++) {
             if (!musicHas(np, i)) continue;
-            float cx = i == MC_SHUFFLE ? mid - pw / 2 - 80 * k : i == MC_PREV ? mid - step : i == MC_NEXT ? mid + step
-                    : i == MC_REPEAT ? mid + pw / 2 + 80 * k : mid;
+            float cx = i == MC_SHUFFLE ? mid - pw / 2 - 70 * k : i == MC_PREV ? mid - step : i == MC_NEXT ? mid + step
+                    : i == MC_REPEAT ? mid + pw / 2 + 70 * k : i == MC_MOON ? tr - 40 * k : mid;
             boolean f = i == musicFocus;
-            float r = (i == MC_PLAY ? 40 : 34) * k;
+            float r = (i == MC_PLAY ? 36 : 32) * k;
+            if (i == MC_MOON && !f) {   // the moon sits on its own glass circle
+                mFill.setColor(Ui.alpha(0x26FFFFFF, a));
+                c.drawCircle(cx, cy, r, mFill);
+                mRing.setColor(Ui.alpha(0x66FFFFFF, a));
+                c.drawCircle(cx, cy, r, mRing);
+            }
             if (f) {
                 mFill.setColor(Ui.alpha(0xFFFFFFFF, a));
                 c.drawCircle(cx, cy, r, mFill);
             }
             boolean active = (i == MC_SHUFFLE && np.shuffleOn) || (i == MC_REPEAT && np.repeatMode != 0);
             int ink = f ? 0xFF141414 : active ? musicAccent : 0xF2FFFFFF;
+            if (i == MC_MOON) {
+                Symbols.draw(getContext(), c, "bedtime", cx, cy, 26 * k, Ui.alpha(ink, a));
+                continue;
+            }
             drawMusicGlyph(c, i == MC_PLAY ? (np.playing ? 3 : 1) : i == MC_PREV ? 0 : i == MC_NEXT ? 2 : i == MC_SHUFFLE ? 4 : 5,
-                    cx, cy, (i == MC_PLAY ? 22 : 17) * k, Ui.alpha(ink, a));
+                    cx, cy, (i == MC_PLAY ? 20 : 15) * k, Ui.alpha(ink, a));
         }
         postInvalidateDelayed(np.playing ? 50 : 500);   // the hill rolls; paused, the times still tick
     }
