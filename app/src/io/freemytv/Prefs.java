@@ -331,6 +331,10 @@ final class Prefs {
     static boolean watchNext() { return sp().getBoolean("watch_next", true); }
     static void setWatchNext(boolean on) { put("watch_next", on); }
 
+    /** Glass edition: the shelf's look, "cards" (wide tiles on a glass bar) or "icons" (a carousel of small icons). */
+    static String shelfStyle() { return sp().getString("shelf_style", "cards"); }
+    static void setShelfStyle(String s) { put("shelf_style", s); }
+
     /** Favourite club and national team, as ESPN team ids: their games come first everywhere. */
     static String club() { return sp().getString("club", "15"); }
     static void setClub(String id) { put("club", id); }

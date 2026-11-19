@@ -1275,6 +1275,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         long up = SystemClock.uptimeMillis();
 
         boolean tilesMoving = step(tileFocus, dt);
+        if (step(dockScroll, dt) && iconDock()) {   // the carousel slides: the icons move under the focus
+            layoutShelf();
+            tilesMoving = true;
+            heroLayer.invalidate();
+        }
         if (reorderAnim) tilesMoving |= stepReorder(dt, up);
         boolean statusMoving = step(statusFocus, dt);
         boolean heroMoving = heroFocus.step(dt);
@@ -1794,7 +1799,32 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         platter.invalidate();
     }
 
+    // Glass edition, the "Íconos" shelf (Ajustes de inicio, Estilo de la barra): small square icons in a carousel, the
+    // focused one always in the middle (the row slides under it), the far ones fading; no glass bar.
+    private final Spring[] dockScroll = {new Spring(0.32f, 0.86f, 0)};
+    private static final float DOCK_ICON = 124, DOCK_STEP = 168, DOCK_CY = 872;
+    private boolean inFade;
+
+    private boolean iconDock() {
+        return Prefs.shelfStyle().equals("icons");
+    }
+
+    private float dockAlpha(int i) {
+        float d = Math.abs(i - dockScroll[0].value);
+        return 1 - Ui.clamp((d - 3.2f) / 1.6f);
+    }
+
     private void layoutShelf() {
+        if (iconDock()) {
+            int n = shelf.size();
+            float s = DOCK_ICON * k, cy = DOCK_CY * k, cx = w / 2f;
+            for (int i = 0; i < n; i++) {
+                float x = cx + (i - dockScroll[0].value) * DOCK_STEP * k;
+                tileRects[i].set(x - s / 2, cy - s / 2, x + s / 2, cy + s / 2);
+            }
+            platterRect.set(0, 0, 0, 0);
+            return;
+        }
         int n = shelf.size();
         float pad = SHELF_PAD * k, gap = TILE_GAP * k;
         float full = (CONTENT_R - MARGIN) * k;
@@ -1815,7 +1845,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     /** Shelf layer: the glass bar and its shadow (it only changes with the background). */
     private void drawPlatter(Canvas c) {
-        if (shelf.isEmpty()) return;
+        if (shelf.isEmpty() || iconDock()) return;
         float radius = (TILE_RADIUS + SHELF_PAD) * k;
         tmp.set(platterRect);
         tmp.offset(0, 18 * k);
@@ -2190,7 +2220,21 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
      * top. No border and no reflection, as Apple does it.
      */
     private void drawShelfTile(Canvas c, int i) {
+        if (iconDock() && !inFade) {   // the carousel's far icons fade out
+            float al = dockAlpha(i);
+            if (al <= 0.01f) return;
+            if (al < 0.99f) {
+                inFade = true;
+                RectF b = tileRects[i];
+                int sv = c.saveLayerAlpha(b.left - 40 * k, b.top - 40 * k, b.right + 40 * k, b.bottom + 80 * k, Math.round(255 * al));
+                drawShelfTile(c, i);
+                c.restoreToCount(sv);
+                inFade = false;
+                return;
+            }
+        }
         HomeApps.Item it = shelf.get(i);
+        if (iconDock() && it.pkg != null && drawDockIcon(c, i, it)) return;
         // Lifted to be moved: a little bigger than focused, with a deeper shadow.
         float l = i == liftIndex ? Math.max(0, moveLift.value) : 0;
         float f = tileFocus[i].value, fc = Ui.clamp(f), s = (1 + FOCUS_GROW * f + LIFT_GROW * l);
@@ -2246,7 +2290,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         } else if (it.tile != null) {
             // One copy, at the focused size: at rest the GPU shrinks it by a tenth, which looks the same. Two copies
             // (resting, focused) swapped resolution visibly as the focus arrived.
-            roundImage(c, cardImage(it, bw * (1 + FOCUS_GROW), bh * (1 + FOCUS_GROW)), cell, r);
+            if (iconDock()) cropImage(c, cardImage(it, bh * 16f / 9 * (1 + FOCUS_GROW), bh * (1 + FOCUS_GROW)), cell, r);
+            else roundImage(c, cardImage(it, bw * (1 + FOCUS_GROW), bh * (1 + FOCUS_GROW)), cell, r);
         }
         // Glass edition: tvOS's white focus rim around the focused tile.
         if (fc > 0.01f && l <= 0.02f) {
@@ -2256,6 +2301,75 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             tmp.set(cell.left - o, cell.top - o, cell.right + o, cell.bottom + o);
             c.drawRoundRect(tmp, r + o, r + o, focusRing);
         }
+        if (iconDock() && fc > 0.01f) {   // the icons' name, under the focused one
+            if (dockName == null) {
+                dockName = new TextPaint(Ui.text(Ui.semibold, 22 * k, 0xFFFFFFFF));
+                dockName.setTextAlign(Paint.Align.CENTER);
+                dockName.setShadowLayer(8 * k, 0, 2 * k, 0x80000000);
+            }
+            dockName.setAlpha(Math.round(255 * fc));
+            c.drawText(it.label == null ? "" : it.label, cell.centerX(), cell.bottom + 40 * k, dockName);
+        }
+    }
+
+    private TextPaint dockName;
+    private final java.util.Map<String, Bitmap> appIcons = new java.util.HashMap<>();
+    private final java.util.Set<String> iconAsked = new java.util.HashSet<>();
+
+    /** The app's own launcher icon, square (made off the UI thread, once). */
+    private Bitmap appIcon(String pkg) {
+        Bitmap b = appIcons.get(pkg);
+        if (b != null || !iconAsked.add(pkg)) return b;
+        final Context ctx = getContext().getApplicationContext();
+        LOADER.execute(() -> {
+            try {
+                android.graphics.drawable.Drawable d = ctx.getPackageManager().getApplicationIcon(pkg);
+                Bitmap out = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888);
+                Canvas cc = new Canvas(out);
+                d.setBounds(0, 0, 256, 256);
+                d.draw(cc);
+                handler.post(() -> {
+                    appIcons.put(pkg, out);
+                    tilesDirty = true;
+                    wake();
+                });
+            } catch (Exception e) {
+                AppLog.w("app icon " + pkg + ": " + e.getMessage());
+            }
+        });
+        return null;
+    }
+
+    /** The "Íconos" shelf: the app's icon on a rounded tile, rising and growing with the focus, its name under it. */
+    private boolean drawDockIcon(Canvas c, int i, HomeApps.Item it) {
+        Bitmap icon = appIcon(it.pkg);
+        if (icon == null) return false;
+        float f = tileFocus[i].value, fc = Ui.clamp(f), s = 1 + 0.18f * f;
+        RectF base = tileRects[i];
+        float half = base.width() * s / 2, cx = base.centerX(), cy = base.centerY() - 14 * k * f, rad = 28 * k * s;
+        cell.set(cx - half, cy - half, cx + half, cy + half);
+        tmp.set(cell);
+        tmp.offset(0, (8 + 12 * fc) * k);
+        shadow.setColor(Ui.alpha(0xFF000000, 0.3f + 0.25f * fc));
+        shadows.draw(c, tmp, rad, SHADOW_BLUR * k, shadow);
+        fill.setShader(null);
+        fill.setColor(0xFF1C1C1E);
+        c.drawRoundRect(cell, rad, rad, fill);
+        roundImage(c, icon, cell, rad);
+        if (fc > 0.01f) {
+            focusRing.setStrokeWidth(3.5f * k);
+            focusRing.setColor(Ui.alpha(0xFFFFFFFF, 0.95f * fc));
+            float o = 4 * k;
+            c.drawRoundRect(cell.left - o, cell.top - o, cell.right + o, cell.bottom + o, rad + o, rad + o, focusRing);
+            if (dockName == null) {
+                dockName = new TextPaint(Ui.text(Ui.semibold, 22 * k, 0xFFFFFFFF));
+                dockName.setTextAlign(Paint.Align.CENTER);
+                dockName.setShadowLayer(8 * k, 0, 2 * k, 0x80000000);
+            }
+            dockName.setAlpha(Math.round(255 * fc));
+            c.drawText(it.label == null ? "" : it.label, cx, cell.bottom + 40 * k, dockName);
+        }
+        return true;
     }
 
     private static final float FOCUS_RISE = 12;
@@ -2791,6 +2905,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         boolean topChanged = aim(topFocus, !sheetOpen && zone == Z_TOP ? topIndex : -1, snap);
         heroChanged |= aim(cardFocus, !sheetOpen && zone == Z_CARDS ? cardIndex : -1, snap) | topChanged;
         heroChanged |= aim(recentFocus, !sheetOpen && zone == Z_RECENT ? recentIndex : -1, snap);
+        if (shelfIndex < shelf.size()) dockScroll[0].target = shelfIndex;
+        if (snap) dockScroll[0].snap(dockScroll[0].target);
         boolean inBubble = !sheetOpen && zone == Z_WATCH;
         heroChanged |= aim(watchFocus, inBubble && watchRow == 0 ? watchIndex : -1, snap);
         heroChanged |= aim(actFocus, inBubble && watchRow == 1 ? actIndex : -1, snap);
@@ -3470,6 +3586,14 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 }
             }
             click.open();
+            return;
+        } else if (zone == Z_WATCH && watchRow == 1 && panelSmallCount() > 0) {
+            click.open();   // a playlist: straight into Spotify
+            try {
+                getContext().startActivity(SpotifyLists.open(Math.min(actIndex, SpotifyLists.IDS.length - 1)));
+            } catch (RuntimeException e) {
+                AppLog.w("spotify playlist: " + e.getMessage());
+            }
             return;
         } else if (zone == Z_WATCH && watchRow == 1) {
             // The bubble's actions: open the app, move it on the shelf, its info.
@@ -4447,7 +4571,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private static final float WATCH_BELOW = 124, WATCH_ARROW = 16;
     private final RectF[] actRects = {new RectF(), new RectF(), new RectF()};
     private final String[] actText = new String[3];
-    private final Spring[] actFocus = {new Spring(0.32f, 0.8f, 0), new Spring(0.32f, 0.8f, 0), new Spring(0.32f, 0.8f, 0)};
+    private final Spring[] actFocus = {new Spring(0.32f, 0.8f, 0), new Spring(0.32f, 0.8f, 0), new Spring(0.32f, 0.8f, 0),
+            new Spring(0.32f, 0.8f, 0), new Spring(0.32f, 0.8f, 0), new Spring(0.32f, 0.8f, 0)};
     /** 0 = the cards, 1 = the actions row. */
     private int watchRow, actIndex;
     private float watchArrowX;
@@ -4791,6 +4916,73 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     }
 
     /** Each card's place for the focus as it is now: the focused one wide, the others narrow (they follow the spring). */
+    private static final float PANEL_SCALE = 0.7f, PANEL_TOP = 212, PANEL_MIN_W = 900;
+    private TextPaint panelSmall, panelPill;
+    private final RectF panelRect = new RectF();
+
+    /** The playlists under the cards (Spotify only, on the "Íconos" shelf). */
+    private int panelSmallCount() {
+        WatchNext.Content c = watch;
+        return iconDock() && c != null && SpotifyLists.PKG.equals(c.pkg) ? SpotifyLists.IDS.length : 0;
+    }
+
+    /**
+     * The "Íconos" shelf's panel: a pane of glass round the cards, a row of Spotify's popular playlists under them, and
+     * a pill under the pane with what's there ("Abrir Spotify · 5 playlists").
+     */
+    private void drawPanelGlass(Canvas c, WatchNext.Content wc) {
+        int ns = panelSmallCount();
+        if (ns > 0) SpotifyLists.load(watchImageReady);
+        float pad = 34 * k, item = 92 * k;
+        float smallTop = watchCard.bottom + 44 * k;
+        float bottom = ns > 0 ? smallTop + item + 64 * k : watchCard.bottom;
+        panelRect.set(watchCard.left - pad, watchCard.top - 20 * k, Math.max(watchCard.right, watchCard.left + PANEL_MIN_W * k) + pad, bottom);
+        tmp.set(panelRect);
+        tmp.offset(0, 18 * k);
+        shadow.setColor(Ui.alpha(0xFF000000, 0.4f));
+        shadows.draw(c, tmp, 30 * k, SHADOW_BLUR * 1.6f * k, shadow);
+        scene.liquid(c, panelRect, 30 * k, tone(0xFFFFFFFF, SMOKE), tone(0.55f, 0.5f), tone(0.02f, 0.01f), 12 * k, 8 * k,
+                tone(0.6f, 0.45f), 1);
+        fill.setShader(null);
+        fill.setColor(0x33000000);
+        c.drawRoundRect(panelRect, 30 * k, 30 * k, fill);
+        if (panelSmall == null) {
+            panelSmall = new TextPaint(Ui.text(Ui.medium, 17 * k, 0xD9FFFFFF));
+            panelPill = new TextPaint(Ui.text(Ui.semibold, 19 * k, 0xF2FFFFFF));
+            panelPill.setTextAlign(Paint.Align.CENTER);
+        }
+        if (ns > 0) {   // "Playlists populares", the covers in a row, their names under them
+            watchHead.setAlpha(217);
+            c.drawText("PLAYLISTS POPULARES", watchCard.left, smallTop - 2 * k, watchHead);
+            float x = watchCard.left, step = item + 66 * k;
+            for (int i = 0; i < ns; i++) {
+                float f = Ui.clamp(actFocus[i].value);
+                cell.set(x, smallTop + 14 * k, x + item, smallTop + 14 * k + item);
+                Bitmap b = SpotifyLists.covers[i];
+                if (b != null) roundImage(c, b, cell, 10 * k);
+                else {
+                    fill.setColor(0x24FFFFFF);
+                    c.drawRoundRect(cell, 10 * k, 10 * k, fill);
+                }
+                if (f > 0.01f) {
+                    focusRing.setStrokeWidth(3.5f * k);
+                    focusRing.setColor(Ui.alpha(0xFFFFFFFF, 0.95f * f));
+                    c.drawRoundRect(cell.left - 5 * k, cell.top - 5 * k, cell.right + 5 * k, cell.bottom + 5 * k, 14 * k, 14 * k, focusRing);
+                }
+                c.drawText(TextUtils.ellipsize(SpotifyLists.NAMES[i], panelSmall, step - 12 * k, TextUtils.TruncateAt.END).toString(),
+                        x, cell.bottom + 28 * k, panelSmall);
+                x += step;
+            }
+        }
+        // The pill under the pane.
+        String app = shelfLabel(wc.pkg);
+        String what = ns > 0 ? "Abrir " + app + "  ·  " + ns + " playlists" : "Abrir " + app + "  ·  " + Math.min(3, wc.items.size()) + " para seguir";
+        float pw = panelPill.measureText(what) + 48 * k, ph = 44 * k, pcx = panelRect.centerX(), pt = panelRect.bottom + 14 * k;
+        tmp.set(pcx - pw / 2, pt, pcx + pw / 2, pt + ph);
+        scene.glass(c, tmp, ph / 2, 0xFFFFFFFF, 0.6f, 0, 0, 0.02f, 1, 1);
+        c.drawText(what, pcx, tmp.centerY() + Ui.halfCap(panelPill), panelPill);
+    }
+
     private void placeWatchCards() {
         WatchNext.Content c = watch;
         if (c == null) return;
@@ -4800,15 +4992,27 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         // Nothing focused yet (the shelf coming up): the first card is the wide one.
         float any = 0;
         for (int i = 0; i < n; i++) any = Math.max(any, Ui.clamp(watchFocus[i].value));
-        float x = TS_LEFT * k, top = TS_TOP * k;
+        float sc = iconDock() ? PANEL_SCALE : 1;
+        small *= sc;
+        big *= sc;
+        float total = 0;
         for (int i = 0; i < n; i++) {
             float f = Ui.clamp(watchFocus[i].value);
             if (i == 0) f = Math.max(f, 1 - any);
-            float cw = small + (big - small) * f, ch = wide ? TS_H * k : cw;
+            total += small + (big - small) * f + (i > 0 ? TS_GAP * k : 0);
+        }
+        float x = iconDock() ? (w - Math.max(total, PANEL_MIN_W * k)) / 2 + Math.max(0, (PANEL_MIN_W * k - total) / 2) : TS_LEFT * k;
+        float top = (iconDock() ? PANEL_TOP : TS_TOP) * k;
+        float x0 = x;
+        for (int i = 0; i < n; i++) {
+            float f = Ui.clamp(watchFocus[i].value);
+            if (i == 0) f = Math.max(f, 1 - any);
+            float cw = small + (big - small) * f, ch = wide ? TS_H * sc * k : cw;
             watchRects[i].set(x, top, x + cw, top + ch);
             x += cw + TS_GAP * k;
         }
-        watchCard.set(TS_LEFT * k, TS_HEAD * k - 30 * k, x, top + TS_H * k + 80 * k);
+        watchHeadX = x0;
+        watchCard.set(x0, top - 60 * k, x - TS_GAP * k, top + TS_H * sc * k + 80 * k);
     }
 
     /** The picture centre-cropped into `r` (never stretched), with rounded corners. */
@@ -4831,8 +5035,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         WatchNext.Content wc = watch;
         if (wc == null) return;
         placeWatchCards();
+        if (iconDock()) drawPanelGlass(c, wc);
         // The heading, with a dot of the app's colour.
-        float hx = watchHeadX, hb = TS_HEAD * k;
+        float hx = watchHeadX, hb = iconDock() ? (PANEL_TOP - 30) * k : TS_HEAD * k;
         if (watchColor != 0xFFFFFFFF) {
             fill.setShader(null);
             fill.setColor(watchColor);
@@ -5912,7 +6117,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 break;
             case Z_WATCH:
                 if (dx != 0 && watchRow == 1) {
-                    int next = Math.max(0, Math.min(2, actIndex + dx));
+                    int next = Math.max(0, Math.min(panelSmallCount() - 1, actIndex + dx));
                     if (next == actIndex) return true;
                     actIndex = next;
                 } else if (dx != 0) {
@@ -5920,8 +6125,15 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                     if (next == watchIndex) return true;
                     watchIndex = next;
                 } else if (dy < 0) {
-                    zone = Z_TOP;
-                    topIndex = 3;
+                    if (watchRow == 1) {
+                        watchRow = 0;   // back up to the big cards
+                    } else {
+                        zone = Z_TOP;
+                        topIndex = 3;
+                    }
+                } else if (watchRow == 0 && panelSmallCount() > 0) {
+                    watchRow = 1;   // down to the playlists
+                    actIndex = 0;
                 } else {
                     zone = Z_SHELF;   // back down to the apps
                 }

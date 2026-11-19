@@ -558,7 +558,7 @@ public class SettingsActivity extends Activity {
 
         private static final String[] UNITS = {"auto", "C", "F"}, THEMES = {"auto", "light", "dark"};
         /** Home Settings: language, temperature, theme, sounds, weather, city, football, favourite club and team. */
-        private static final int CITY_ROW = 5, FUTBOL_ROW = 6, CLUB_ROW = 7, NATION_ROW = 8, WATCH_ROW = 9;
+        private static final int CITY_ROW = 5, FUTBOL_ROW = 6, CLUB_ROW = 7, NATION_ROW = 8, WATCH_ROW = 9, STYLE_ROW = 10;
         private static final String[] HOME_PICTURES = {"black", Gallery.LANDSCAPES, Gallery.ART, Gallery.ABSTRACT,
                 Gallery.ANIMALS, Gallery.FAVORITES};
         private static final String[] SCREENSAVERS = {Gallery.LANDSCAPES, Gallery.ART, Gallery.ABSTRACT, Gallery.ANIMALS,
@@ -688,6 +688,7 @@ public class SettingsActivity extends Activity {
             l.add("Club favorito");
             l.add("Selección favorita");
             l.add("Continuar viendo");
+            l.add("Estilo de la barra");
             return l.toArray(new String[0]);
         }
 
@@ -707,6 +708,7 @@ public class SettingsActivity extends Activity {
             v[CLUB_ROW] = CLUBS[indexOf(CLUBS, Prefs.club())][1];
             v[NATION_ROW] = NATIONS[indexOf(NATIONS, Prefs.nation())][1];
             v[WATCH_ROW] = onOff(Prefs.watchNext());
+            v[STYLE_ROW] = Prefs.shelfStyle().equals("icons") ? "Íconos" : "Tarjetas";
             return v;
         }
 
@@ -791,6 +793,7 @@ public class SettingsActivity extends Activity {
                 case CITY_ROW: return;
                 case FUTBOL_ROW: Prefs.setFutbol(!Prefs.futbol()); break;
                 case WATCH_ROW: Prefs.setWatchNext(!Prefs.watchNext()); break;
+                case STYLE_ROW: Prefs.setShelfStyle(Prefs.shelfStyle().equals("icons") ? "cards" : "icons"); break;
                 case CLUB_ROW: {
                     if (!Prefs.futbol()) return;
                     int at = indexOf(CLUBS, Prefs.club());
