@@ -5064,7 +5064,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         boolean wide = !iconDock();
         float x, y, pw, ph, big, ct, lx, lw, lHead, rStep, th;
         if (wide) {
-            x = 36 * k;   // where the cards were (option E): no pane, straight on the background
+            // Where the cards were (option E), no pane, straight on the background; centred over the bar of apps.
+            float content = (400 + 56 + 560 + (ns > 0 ? 60 + 240 + 140 : 0)) * k;
+            x = (w - content) / 2 - 44 * k;
             y = 242 * k;
             pw = w - 72 * k;
             ph = 520 * k;
