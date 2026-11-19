@@ -869,9 +869,156 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     /** A picture is chosen as the background (it may still be loading): the screen keeps the dark look meanwhile. */
     private boolean wallpaperWanted;
 
+    // MARK: - Glass edition: the scene background (Val Gardena, its sky from the weather)
+
+    /** Home background "scene": the same mountains always; behind them, a sky for the weather now, drifting slowly. */
+    static final String SCENE = "scene";
+    private Bitmap sceneSky, sceneLand;
+    private String sceneKey = "";
+    private boolean sceneLoading;
+    private LinearGradient sceneScrimLeft, sceneScrimBottom;
+    private final Paint scenePaint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
+    private static final long SCENE_DRIFT_MS = 180_000;   // one slow sweep of the sky there and back
+    /** About 15 frames a second while the scene shows, and only then: the sky moves a few pixels a second. */
+    private final Runnable sceneTick = new Runnable() {
+        @Override public void run() {
+            if (!running || sceneSky == null) return;
+            sky.invalidate();
+            handler.postDelayed(this, 66);
+        }
+    };
+
+    /** Which sky goes with the weather: clear, sunset, cloudy, rain, storm or night. */
+    private String sceneState() {
+        HomeData.Weather wx = data.weather;
+        int c = wx.code;
+        boolean storm = c >= 95, rain = (c >= 51 && c <= 67) || (c >= 80 && c <= 82),
+                cloudy = c == 3 || c == 45 || c == 48 || (c >= 71 && c <= 77) || c == 85 || c == 86;
+        if (storm) return "storm";
+        if (!wx.isDay) return "night";
+        if (rain) return "rain";
+        long now = System.currentTimeMillis();
+        if (wx.sunset > 0 && Math.abs(wx.sunset - now) < 50 * 60_000L) return "sunset";
+        return cloudy ? "cloudy" : "clear";
+    }
+
+    private void updateScene(Context ctx) {
+        if (!wallpaperWanted) {
+            wallpaperWanted = true;
+            checkNight(false);
+        }
+        final String state = sceneState();
+        if (state.equals(sceneKey) || sceneLoading) {
+            if (sceneSky != null) restartScene();
+            return;
+        }
+        sceneLoading = true;
+        LOADER.execute(() -> {
+            Bitmap skyB = null, landB = null, made = null;
+            int[] frost = null;
+            try {
+                android.content.res.AssetManager am = ctx.getAssets();
+                try (java.io.InputStream in = am.open("scene/sky_" + state + ".jpg")) {
+                    skyB = android.graphics.BitmapFactory.decodeStream(in);
+                }
+                Bitmap raw;
+                try (java.io.InputStream in = am.open("scene/land.webp")) {
+                    raw = android.graphics.BitmapFactory.decodeStream(in);
+                }
+                // The mountains' light for this weather: duller with rain, dark and blue at night, warm at sunset.
+                float br, sat, rr = 1, gg = 1, bb = 1;
+                switch (state) {
+                    case "sunset": br = 0.92f; sat = 1.05f; rr = 1.08f; gg = 0.98f; bb = 0.88f; break;
+                    case "cloudy": br = 0.82f; sat = 0.7f; bb = 1.02f; break;
+                    case "rain": br = 0.66f; sat = 0.55f; rr = 0.92f; gg = 0.97f; bb = 1.08f; break;
+                    case "storm": br = 0.5f; sat = 0.45f; rr = 0.95f; gg = 0.98f; bb = 1.05f; break;
+                    case "night": br = 0.22f; sat = 0.5f; rr = 0.85f; gg = 0.92f; bb = 1.25f; break;
+                    default: br = 1; sat = 1;
+                }
+                android.graphics.ColorMatrix cm = new android.graphics.ColorMatrix();
+                cm.setSaturation(sat);
+                android.graphics.ColorMatrix sc = new android.graphics.ColorMatrix();
+                sc.setScale(br * rr, br * gg, br * bb, 1);
+                cm.postConcat(sc);
+                landB = Bitmap.createBitmap(Backdrop.W, Backdrop.H, Bitmap.Config.ARGB_8888);
+                Paint lp = new Paint(Paint.FILTER_BITMAP_FLAG);
+                lp.setColorFilter(new android.graphics.ColorMatrixColorFilter(cm));
+                new Canvas(landB).drawBitmap(raw, null, new RectF(0, 0, Backdrop.W, Backdrop.H), lp);
+                raw.recycle();
+                // A still copy (the sky at its start) for the glass's blur and the first frame.
+                made = Bitmap.createBitmap(Backdrop.W, Backdrop.H, Bitmap.Config.ARGB_8888);
+                Canvas mc = new Canvas(made);
+                float s = Backdrop.H / (float) skyB.getHeight();
+                mc.drawBitmap(skyB, null, new RectF(0, 0, skyB.getWidth() * s, Backdrop.H), lp.getColorFilter() == null ? null : new Paint(Paint.FILTER_BITMAP_FLAG));
+                mc.drawBitmap(landB, 0, 0, null);
+                withWallpaperScrims(made);
+                frost = wallpaperFrost(made);
+            } catch (Exception | OutOfMemoryError e) {
+                AppLog.w("scene: " + e.getMessage());
+            }
+            final Bitmap fs = skyB, fl = landB, fm = made;
+            final int[] ff = frost;
+            handler.post(() -> {
+                sceneLoading = false;
+                if (fs == null || fl == null || fm == null || !SCENE.equals(Prefs.homeBackgroundShown(ctx))) return;
+                sceneSky = fs;
+                sceneLand = fl;
+                sceneKey = state;
+                wallpaperBefore = null;
+                wallpaper = fm;
+                wallpaperKey = SCENE;
+                wallpaperAlpha = 1;
+                wallpaperFrostPx = ff;
+                if (bgTo == null && bgFadeAt == 0) neutralGlass();
+                checkNight(true);
+                sky.invalidate();
+                restartScene();
+            });
+        });
+    }
+
+    private void restartScene() {
+        handler.removeCallbacks(sceneTick);
+        if (running && sceneSky != null) handler.post(sceneTick);
+    }
+
+    /** The scene: the sky drifting slowly behind, the mountains still in front, the scrims for the text on top. */
+    private boolean drawScene(Canvas c) {
+        Bitmap s = sceneSky, l = sceneLand;
+        if (s == null || l == null) return false;
+        float scale = h / (float) s.getHeight(), sw = s.getWidth() * scale, room = Math.max(0, sw - w);
+        float t = (SystemClock.uptimeMillis() % SCENE_DRIFT_MS) / (float) SCENE_DRIFT_MS;   // 0 → 1
+        float u = t < 0.5f ? t * 2 : 2 - t * 2, ease = u * u * (3 - 2 * u);
+        float x = -room * ease;
+        tmp.set(x, 0, x + sw, h);
+        c.drawBitmap(s, null, tmp, scenePaint);
+        c.drawBitmap(l, null, screen, scenePaint);
+        if (sceneScrimLeft == null || sceneScrimLeft == null) {
+            sceneScrimLeft = new LinearGradient(0, 0, w * 0.6f, 0, new int[] {0x99000000, 0x4D000000, 0x00000000},
+                    new float[] {0, 0.55f, 1}, Shader.TileMode.CLAMP);
+            sceneScrimBottom = new LinearGradient(0, h, 0, h * 0.55f, 0x8C000000, 0x00000000, Shader.TileMode.CLAMP);
+        }
+        c.drawColor(0x40000000);
+        fill.setShader(sceneScrimLeft);
+        c.drawRect(0, 0, w, h, fill);
+        fill.setShader(sceneScrimBottom);
+        c.drawRect(0, h * 0.55f, w, h, fill);
+        fill.setShader(null);
+        return true;
+    }
+
     private void updateWallpaper() {
         final Context ctx = getContext().getApplicationContext();
         final String kind = Prefs.homeBackgroundShown(ctx);
+        if (SCENE.equals(kind)) {
+            updateScene(ctx);
+            return;
+        }
+        if (sceneSky != null) {   // the scene was on: it goes
+            sceneSky = sceneLand = null;
+            sceneKey = "";
+            handler.removeCallbacks(sceneTick);
+        }
         boolean wanted = Gallery.photos(kind);
         if (wanted != wallpaperWanted) {
             wallpaperWanted = wanted;
@@ -1121,6 +1268,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     @Override public void onData() {
         wake();
+        if (SCENE.equals(Prefs.homeBackgroundShown(getContext()))) updateWallpaper();   // the weather may want another sky
         updatePalette();
         checkNight(true);
         layoutStatus();
@@ -4585,7 +4733,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             fill.setShader(null);
             fill.setColorFilter(null);
             fill.setDither(false);
-            if (wallpaper != null) {
+            if (sceneSky != null && drawScene(c)) {
+                // the scene draws itself (moving)
+            } else if (wallpaper != null) {
                 imagePaint.setColorFilter(v);
                 if (wallpaperBefore != null && wallpaperAlpha < 1) {
                     imagePaint.setAlpha(255);

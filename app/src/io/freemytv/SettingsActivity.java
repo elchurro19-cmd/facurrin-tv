@@ -559,7 +559,7 @@ public class SettingsActivity extends Activity {
         private static final String[] UNITS = {"auto", "C", "F"}, THEMES = {"auto", "light", "dark"};
         /** Home Settings: language, temperature, theme, sounds, weather, city, football, favourite club and team. */
         private static final int CITY_ROW = 5, FUTBOL_ROW = 6, CLUB_ROW = 7, NATION_ROW = 8, WATCH_ROW = 9, STYLE_ROW = 10;
-        private static final String[] HOME_PICTURES = {"black", Gallery.LANDSCAPES, Gallery.ART, Gallery.ABSTRACT,
+        private static final String[] HOME_PICTURES = {"black", HomeView.SCENE, Gallery.LANDSCAPES, Gallery.ART, Gallery.ABSTRACT,
                 Gallery.ANIMALS, Gallery.FAVORITES};
         private static final String[] SCREENSAVERS = {Gallery.LANDSCAPES, Gallery.ART, Gallery.ABSTRACT, Gallery.ANIMALS,
                 Gallery.FAVORITES, "clock"};
@@ -655,7 +655,8 @@ public class SettingsActivity extends Activity {
         }
 
         private static String pictureName(String v) {
-            return Gallery.photos(v) ? Gallery.name(v) : v.equals("clock") ? "Reloj" : "Negro";
+            return Gallery.photos(v) ? Gallery.name(v) : v.equals(HomeView.SCENE) ? "Val Gardena con el clima"
+                    : v.equals("clock") ? "Reloj" : "Negro";
         }
 
         /** The Liga Profesional's clubs and South America's national teams, as ESPN ids. */
