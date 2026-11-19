@@ -1076,8 +1076,7 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
         mTime.setAlpha(Math.round((dk ? 75 : 204) * a));
         c.drawText(done, tx, by + 44 * k, mTime);
         c.drawText(total, tr - mTime.measureText(total), by + 44 * k, mTime);
-        // Dark: the controls only for 3 s after a key, then they fade away.
-        float ca = !dk ? a : a * Ui.clamp(1 - (SystemClock.uptimeMillis() - darkKeyAt - 3000) / 600f);
+        float ca = a;   // the controls stay, dark too
         // The controls: previous, play and next in a glass pill, shuffle and repeat on its sides; the moon at the end.
         float cy = ct + 330 * k, mid = tx + 360 * k, step = 96 * k, ph = 84 * k, pw = 2 * step + 90 * k;
         mRect.set(mid - pw / 2, cy - ph / 2, mid + pw / 2, cy + ph / 2);
@@ -1112,9 +1111,7 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
                     cx, cy, (i == MC_PLAY ? 20 : 15) * k, Ui.alpha(ink, ca));
         }
         if (dk) {
-            mHint.setAlpha(Math.round(70 * ca));
-            if (ca > 0.01f) c.drawText("OK pausa  ·  ← → cambia de tema  ·  ↓ vuelve a la luz", w / 2f, h - 70 * k, mHint);
-            postInvalidateDelayed(ca > 0.01f ? 50 : 1000);
+            postInvalidateDelayed(1000);   // no legend: the buttons are on screen
             return;
         }
         postInvalidateDelayed(np.playing ? 50 : 500);   // the hill rolls; paused, the times still tick
