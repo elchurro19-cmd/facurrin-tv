@@ -116,6 +116,14 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private static final int Z_PLAYER_BAR = 14;
     /** Glass edition: the sleep timer's panel (row 0 its switch, row 1 the times). */
     private static final int Z_SLEEP = 15;
+    /** Glass edition: the weather under the clock as a button (OK opens its panel where the clock is, W1). */
+    private static final int Z_WXBTN = 16;
+    private boolean wxOpen, wxWas;
+    /** The drawer under the bar (D2): wide buttons; Entradas unfolds the inputs in place, the team its card. */
+    private static final int TEAM_KIND = 30;
+    private int drawerPanel;   // 0 the buttons, 1 the inputs, 2 the team's card
+    private List<HomeApps.Item> drawerButtons = new ArrayList<>(), inputsList = new ArrayList<>();
+    private TextPaint btnTitle, btnSub, wxHint;
     /** The drawer's weather card: page 0 the next hours, page 1 the next seven days. */
     private final Spring[] weatherFocus = {new Spring(0.26f, 0.85f, 0)};
     private int weatherPage;
@@ -708,7 +716,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         // First time: right away (a cold start opens with the apps already there); missing logos come from reload().
         setShelf(HomeApps.shelf(a, false));
         setStatusItems(statusList(a));
-        setDrawerItems(drawerList(a));
+        setDrawerLists(drawerList(a), HomeApps.allInputs(a));
     }
 
     // MARK: - Lifecycle (called by HomeActivity)
@@ -1904,6 +1912,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         futbolMinute = minute;
         futbolSizes = sizes;
         List<Futbol.Match> ms = data.matches;
+        Futbol.Match mine = teamMatch(false);   // E2: your club's game, live or next (else its last)
+        if (mine == null) mine = teamMatch(true);
+        if (mine != null) ms = java.util.Collections.singletonList(mine);
         int n = ms.size();
         long now = System.currentTimeMillis();
         String[] line = new String[n], shrt = new String[n], status = new String[n];
@@ -2637,9 +2648,38 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     // MARK: - Bottom drawer
 
     private static List<HomeApps.Item> drawerList(Context c) {
-        List<HomeApps.Item> list = HomeApps.allInputs(c);
-        list.addAll(HomeApps.drawerShortcuts(c));
+        List<HomeApps.Item> list = new ArrayList<>();
+        HomeApps.Item browser = null;
+        for (HomeApps.Item it : HomeApps.drawerShortcuts(c)) {
+            if (it.kind == HomeApps.ALL_APPS) it.label = "Todas las apps";
+            if (it.kind == HomeApps.ANDROID_SETTINGS) it.label = "Ajustes de la TV";
+            if (it.kind == HomeApps.APP) browser = it;
+            else list.add(it);
+        }
+        if (!HomeApps.allInputs(c).isEmpty()) list.add(HomeApps.action(HomeApps.INPUTS, "inputs", "Entradas", "hdmi"));
+        if (Prefs.futbol()) list.add(HomeApps.action(TEAM_KIND, "team", "Mi equipo", "tv"));
+        if (browser != null) list.add(browser);
         return list;
+    }
+
+    /** New lists from reload(): kept under the inputs while they're unfolded. */
+    private void setDrawerLists(List<HomeApps.Item> buttons, List<HomeApps.Item> inputs) {
+        inputsList = inputs;
+        drawerButtons = buttons;
+        setDrawerItems(drawerPanel == 1 ? new ArrayList<>(inputs) : buttons);
+    }
+
+    /** Entradas unfolds: the drawer's row becomes TV en vivo and the HDMI inputs; Back folds it again. */
+    private void unfoldInputs(boolean open) {
+        drawerPanel = open ? 1 : 0;
+        setDrawerItems(open ? new ArrayList<>(inputsList) : drawerButtons);
+        drawerIndex = 0;
+        if (!open) {
+            for (int i = 0; i < drawerItems.size(); i++) if (drawerItems.get(i).kind == HomeApps.INPUTS) drawerIndex = i;
+        }
+        for (int i = 0; i < drawerFocus.length; i++) drawerFocus[i].snap(i == drawerIndex ? 1 : 0);
+        layoutDrawer();
+        drawerDirty = true;
     }
 
     private void setDrawerItems(List<HomeApps.Item> list) {
@@ -2666,12 +2706,25 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     }
 
     private void layoutDrawer() {
+        if (drawerPanel != 1) {   // D2: wide buttons in a row, centred
+            int n = drawerItems.size();
+            float gap = 24 * k, bw = Math.min(400 * k, (CONTENT_R * k - MARGIN * k - Math.max(0, n - 1) * gap) / Math.max(1, n));
+            float x = (w - (n * bw + Math.max(0, n - 1) * gap)) / 2, top = (ROW_TOP + 8) * k;
+            for (int i = 0; i < n; i++) {
+                drawerRects[i].set(x, top, x + bw, top + 110 * k);
+                x += bw + gap;
+            }
+            futbolCard.set((w - 1040 * k) / 2, CARDS_TOP * k, (w + 1040 * k) / 2, (CARDS_TOP + CARDS_H) * k);
+            weatherCard.set(0, 0, 0, 0);
+            drawerDirty = true;
+            return;
+        }
         int n = drawerItems.size();
         float left = MARGIN * k, right = CONTENT_R * k;
         float gap = 18 * k, groupGap = 56 * k;
         int groups = drawerInputs > 0 && drawerInputs < n ? 2 : 1;
         float tw = Math.min(230 * k, (right - left - Math.max(0, n - groups) * gap - (groups - 1) * groupGap) / Math.max(1, n));
-        float x = left, top = ROW_TOP * k;
+        float x = (w - (n * tw + Math.max(0, n - 1) * gap)) / 2, top = ROW_TOP * k;   // centred
         for (int i = 0; i < n; i++) {
             if (i == drawerInputs && i > 0) x += groupGap - gap;
             drawerRects[i].set(x, top, x + tw, top + ROW_H * k);
@@ -2696,6 +2749,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     }
 
     private void closeDrawer() {
+        if (drawerPanel == 1) unfoldInputs(false);
+        drawerPanel = 0;
         drawerOpen = false;
         drawer.target = 0;
         zone = Z_SHELF;
@@ -2740,14 +2795,73 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         hourPaint.setColor(tone(L_DIM, 0xADFFFFFF));
         hourTemp.setColor(drawerInk(0.95f));
         float titleBase = ROW_TITLE * k;
-        if (drawerInputs > 0) c.drawText(Ui.tr("Inputs"), drawerRects[0].left + 4 * k, titleBase, rowTitle);
-        if (drawerInputs < drawerItems.size()) c.drawText(Ui.tr("Shortcuts"), drawerRects[drawerInputs].left + 4 * k, titleBase, rowTitle);
+        if (drawerPanel == 1) c.drawText("Entradas  ·  Atrás vuelve", drawerRects[0].left + 4 * k, titleBase, rowTitle);
+        if (drawerPanel != 1) {   // D2: the wide buttons, and the team's card under them when it's open
+            for (int i = 0; i < drawerItems.size(); i++) drawDrawerButton(c, i);
+            if (drawerPanel == 2 && Prefs.futbol()) drawFutbolCard(c, futbolCard);
+            return;
+        }
         int top = -1;
         for (int i = 0; i < drawerItems.size(); i++) if (drawerFocus[i].value > 0.02f && (top < 0 || drawerFocus[i].value > drawerFocus[top].value)) top = i;
         for (int i = 0; i < drawerItems.size(); i++) if (i != top) drawDrawerTile(c, i);
         if (top >= 0) drawDrawerTile(c, top);
-        if (Prefs.weather()) drawWeatherCard(c, weatherCard);
-        if (Prefs.futbol()) drawFutbolCard(c, futbolCard);
+        // (the inputs unfolded: no cards under them; the weather lives under the clock now)
+    }
+
+    /** D2: a wide drawer button: its symbol (the team's crest) on the left, the name and a line under it. */
+    private void drawDrawerButton(Canvas c, int i) {
+        HomeApps.Item it = drawerItems.get(i);
+        float f = Ui.clamp(drawerFocus[i].value), s = 1 + 0.04f * f;
+        RectF base = drawerRects[i];
+        float cx = base.centerX(), cy = base.centerY();
+        cell.set(cx - base.width() * s / 2, cy - base.height() * s / 2, cx + base.width() * s / 2, cy + base.height() * s / 2);
+        float r = cell.height() / 2;
+        if (f > 0.01f) {
+            tmp.set(cell);
+            tmp.offset(0, 12 * k * f);
+            shadow.setColor(Ui.alpha(0xFF000000, 0.45f * f));
+            shadows.draw(c, tmp, r, SHADOW_BLUR * k, shadow);
+        }
+        if (f < 0.99f) drawerGlass(c, cell, r, 0.7f, 0x14000000, 6 * k);
+        if (f > 0.01f) {
+            fill.setShader(null);
+            fill.setColor(Ui.alpha(WHITE, f));
+            c.drawRoundRect(cell, r, r, fill);
+        }
+        int ink = blend(tone(L_INK, 0xF2FFFFFF), INK, f), dim = blend(tone(L_DIM, 0xB3FFFFFF), 0xB3141414, f);
+        if (btnTitle == null) {
+            btnTitle = new TextPaint(Ui.text(Ui.semibold, 27 * k, 0xFFFFFFFF));
+            btnSub = new TextPaint(Ui.text(Ui.regular, 20 * k, 0xB3FFFFFF));
+        }
+        String title = it.label, sub = "";
+        float ix = cell.left + 58 * k * s, tx = cell.left + 110 * k * s, room = cell.right - 24 * k - tx;
+        if (it.kind == TEAM_KIND) {   // the club: its crest, its name, the game (live: the score and the minute)
+            Futbol.Match m = teamMatch(false);
+            if (m == null) m = teamMatch(true);
+            if (m != null) {
+                boolean home = m.home.id.equals(Futbol.CLUB);
+                Futbol.Team me = home ? m.home : m.away, them = home ? m.away : m.home;
+                title = me.shortName;
+                long now = System.currentTimeMillis();
+                sub = m.live() || m.done() ? Futbol.score(m) + " vs " + them.shortName + (m.live() ? "  ·  " + Futbol.status(m, now) : "")
+                        : Futbol.status(m, now) + " vs " + them.shortName;
+                if (me.crest != null) drawCrest(c, me.crest, ix - 26 * k * s, cy, 52 * k * s, 1);
+                else Symbols.draw(getContext(), c, "tv", ix, cy, 34 * k * s, ink);
+            } else Symbols.draw(getContext(), c, "tv", ix, cy, 34 * k * s, ink);
+        } else {
+            Symbols.draw(getContext(), c, it.symbol, ix, cy, 34 * k * s, ink);
+            if (it.kind == HomeApps.ALL_APPS) sub = others.size() + " apps";
+            else if (it.kind == HomeApps.ANDROID_SETTINGS) sub = "Imagen, sonido, red";
+            else if (it.kind == HomeApps.INPUTS) sub = "TV en vivo · HDMI";
+        }
+        btnTitle.setColor(ink);
+        btnTitle.setTextSize(27 * k * s);
+        btnSub.setColor(dim);
+        btnSub.setTextSize(20 * k * s);
+        boolean two = !sub.isEmpty();
+        c.drawText(TextUtils.ellipsize(title, btnTitle, room, TextUtils.TruncateAt.END).toString(), tx,
+                two ? cy - 4 * k : cy + Ui.halfCap(btnTitle), btnTitle);
+        if (two) c.drawText(TextUtils.ellipsize(sub, btnSub, room, TextUtils.TruncateAt.END).toString(), tx, cy + 28 * k * s, btnSub);
     }
 
     /** Square drawer button: symbol and name; an input with no device is dimmed. Focused: white, with dark text. */
@@ -2960,6 +3074,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             dockScroll[0].target = shelfIndex + n * Math.round((dockScroll[0].target - shelfIndex) / n);
         }
         if (snap) dockScroll[0].snap(dockScroll[0].target);
+        boolean wxNow = zone == Z_WXBTN;
+        if (!wxNow) wxOpen = false;
+        if (wxNow || wxWas) heroLayer.invalidate();
+        wxWas = wxNow;
         boolean inBubble = !sheetOpen && zone == Z_WATCH;
         heroChanged |= aim(watchFocus, inBubble && watchRow == 0 ? watchIndex : -1, snap);
         heroChanged |= aim(actFocus, inBubble && watchRow == 1 ? actIndex : -1, snap);
@@ -3281,13 +3399,13 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             try {
                 final List<HomeApps.Item> s = HomeApps.shelf(c, true);
                 final List<HomeApps.Item> st = statusList(c);
-                final List<HomeApps.Item> d = drawerList(c);
+                final List<HomeApps.Item> d = drawerList(c), ins = HomeApps.allInputs(c);
                 final List<HomeApps.Item> o = HomeApps.others(c);
                 AppLog.w("apps: " + s.size() + " on the shelf, " + o.size() + " in All Apps");
                 handler.post(() -> {
                     setShelf(s);
                     setStatusItems(st);
-                    setDrawerItems(d);
+                    setDrawerLists(d, ins);
                     if (!sheetOpen) setOthers(o);
                 });
             } catch (RuntimeException e) {
@@ -3361,6 +3479,22 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     }
 
     private void back() {
+        if (zone == Z_WXBTN) {   // the weather panel closes; then back to the apps
+            if (wxOpen) wxOpen = false;
+            else zone = Z_SHELF;
+            retarget(false);
+            click.move();
+            return;
+        }
+        if (!sheetOpen && (zone == Z_DRAWER || zone == Z_FUTBOL) && drawerPanel != 0) {
+            if (drawerPanel == 1) unfoldInputs(false);
+            drawerPanel = 0;
+            zone = Z_DRAWER;
+            drawerDirty = true;
+            retarget(false);
+            click.move();
+            return;
+        }
         if (cardEngaged && (zone == Z_FUTBOL || zone == Z_WEATHER)) {
             cardEngaged = false;   // out of the card's pages, still on the card
             drawerDirty = true;
@@ -3500,13 +3634,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                     drawerIndex = next;
                 } else if (dy < 0) {
                     closeDrawer();
-                } else if ((Prefs.futbol() || Prefs.weather()) && !talkBack()) {
-                    // Down onto the card under the focused button.
-                    boolean weatherSide = Prefs.weather() && (!Prefs.futbol()
-                            || drawerRects[drawerIndex].centerX() < futbolCard.left);
-                    zone = weatherSide ? Z_WEATHER : Z_FUTBOL;
+                } else if (drawerPanel == 2 && Prefs.futbol() && !talkBack()) {
+                    zone = Z_FUTBOL;   // down onto the team's card
                     cardEngaged = false;
-                    if (weatherSide) weatherPage = 0;
                 } else if (talkBack() && !widgets().isEmpty()) {
                     // Only with TalkBack: the widgets are there to be read, and this is how it gets to them.
                     zone = WIDGETS;
@@ -3555,6 +3685,12 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     private void activate() {
         wake();
+        if (zone == Z_WXBTN) {   // W1: the weather's panel opens (or closes)
+            wxOpen = !wxOpen;
+            click.open();
+            retarget(false);
+            return;
+        }
         if (zone == Z_IDLE) {   // nothing focused: OK brings the focus back
             zone = idleFrom;
             retarget(false);
@@ -3594,6 +3730,18 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         } else if (zone == Z_DRAWER) {
             if (drawerItems.isEmpty()) return;
             it = drawerItems.get(drawerIndex);
+            if (drawerPanel == 0 && it.kind == HomeApps.INPUTS) {   // Entradas unfolds in place
+                click.open();
+                unfoldInputs(true);
+                retarget(false);
+                return;
+            }
+            if (it.kind == TEAM_KIND) {   // the team's card opens (or closes) under the buttons
+                click.open();
+                drawerPanel = drawerPanel == 2 ? 0 : 2;
+                drawerDirty = true;
+                return;
+            }
             r = drawerRects[drawerIndex];
         } else if (zone == Z_TOP) {
             if (topIndex < 3) {
@@ -4331,12 +4479,44 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
     }
 
+    /** The weather under the clock, focused: a glass pill round it, a ring, and what OK does. */
+    private void drawWxFocus(Canvas c) {
+        tmp.set(52 * k, 488 * k, 440 * k, 594 * k);
+        drawerGlass(c, tmp, tmp.height() / 2, 0.55f, 0x1A000000, 8 * k);
+        focusRing.setStrokeWidth(4 * k);
+        focusRing.setColor(0xF2FFFFFF);
+        float o = 6 * k;
+        c.drawRoundRect(tmp.left - o, tmp.top - o, tmp.right + o, tmp.bottom + o, tmp.height() / 2 + o, tmp.height() / 2 + o, focusRing);
+        if (wxHint == null) {
+            wxHint = new TextPaint(Ui.text(Ui.semibold, 26 * k, 0xE6FFFFFF));
+            wxHint.setShadowLayer(10 * k, 0, 2 * k, 0x80000000);
+        }
+        c.drawText("OK · ver el clima", tmp.right + 26 * k, tmp.centerY() + Ui.halfCap(wxHint), wxHint);
+    }
+
+    /** W1: the weather's panel where the clock was: now and the next hours on top, the next days under them. */
+    private void drawWxPanel(Canvas c) {
+        RectF r = new RectF(60 * k, 160 * k, 1060 * k, 760 * k);
+        drawerGlass(c, r, 44 * k, 0.72f, 0x1A000000, 10 * k);
+        cardTitle.setColor(tone(L_DIM, 0xB3FFFFFF));
+        cardText.setColor(drawerInk(0.95f));
+        cardDim.setColor(tone(L_DIM, 0xADFFFFFF));
+        cardDimRight.setColor(tone(L_FAINT, 0x99FFFFFF));
+        bigTemp.setColor(drawerInk(1));
+        hourPaint.setColor(tone(L_DIM, 0xADFFFFFF));
+        hourTemp.setColor(drawerInk(0.95f));
+        RectF top = new RectF(r.left, r.top, r.right, r.top + 300 * k), bottom = new RectF(r.left, r.bottom - 300 * k, r.right, r.bottom);
+        drawWeather(c, top);
+        drawWeek(c, bottom);
+    }
+
     private void drawLightTop(Canvas c) {
         applyTone();
         if (!picksOn()) {
             // With an app's shelf up, the big clock, the weather and the games fade out and a small clock takes the
             // top left (option E).
-            float up = Ui.clamp(bubbleShow[0].value), keep = 1 - up;
+            float up = Math.max(Ui.clamp(bubbleShow[0].value), wxOpen ? 1 : 0), keep = 1 - up;
+            if (zone == Z_WXBTN && !wxOpen) drawWxFocus(c);
             if (keep > 0.99f) {
                 drawClock(c);
                 if (Prefs.futbol()) drawFutbolRow(c);
@@ -4347,6 +4527,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 c.restoreToCount(saved);
             }
             if (up > 0.01f) drawSmallClock(c, up);
+            if (wxOpen) drawWxPanel(c);
             drawShelfHint(c);
             drawNpCard(c);
             drawSleepPanel(c);
@@ -6701,6 +6882,19 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                     if (!shelf.isEmpty()) shelfIndex = nearest(tileRects, tileRects.length, recentRects[recentIndex].centerX());
                 }
                 break;
+            case Z_WXBTN:
+                if (wxOpen) {
+                    if (dx < 0) wxOpen = false;   // ← closes the panel
+                    else return true;
+                } else if (dx > 0) {
+                    if (nowPlaying != null && nowPlaying.visible()) zone = Z_PLAYER;
+                    else {
+                        zone = Z_TOP;
+                        topIndex = 3;
+                    }
+                } else if (dy > 0) zone = Z_SHELF;
+                else return true;
+                break;
             case Z_PLAYER:
                 if (dx > 0) {
                     zone = Z_TOP;
@@ -6709,6 +6903,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                     zone = Z_TOP;
                     topIndex = 2;
                     selectTab(2);
+                } else if (dx < 0 && Prefs.weather()) {
+                    zone = Z_WXBTN;   // left of the music: the weather under the clock
                 } else if (dy > 0) {
                     if (npCollapsed) {
                         zone = cards.isEmpty() ? Z_SHELF : Z_CARDS;
@@ -6797,6 +6993,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 // Left from the first round button: the now-playing widget, when it shows.
                 if (dx < 0 && topIndex == 3 && nowPlaying != null && nowPlaying.visible()) {
                     zone = Z_PLAYER;
+                    break;
+                }
+                if (dx < 0 && topIndex == 3 && !picksOn() && Prefs.weather()) {
+                    zone = Z_WXBTN;   // no music: left of the first button is the weather
                     break;
                 }
                 if (dx != 0) {
