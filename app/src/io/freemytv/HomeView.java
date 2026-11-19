@@ -5067,7 +5067,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             // Where the cards were (option E), no pane, straight on the background; centred over the bar of apps.
             float content = (400 + 56 + 560 + (ns > 0 ? 60 + 240 + 140 : 0)) * k;
             x = (w - content) / 2 - 44 * k;
-            y = 242 * k;
+            y = 192 * k;   // the middle between the top row and the bar
             pw = w - 72 * k;
             ph = 520 * k;
             big = 400 * k;
