@@ -1291,13 +1291,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         boolean watchFading = step(watchShow, dt) | step(watchActive, dt) | shelfUpMoving;
         // The shelf's hint (passing over an app) and the content background (resting on it).
         hintShow[0].target = !iconDock() && !sheetOpen && zone == Z_SHELF && drawer.value < 0.02f && watchShown() ? 1 : 0;
-        if (iconDock()) {   // "Íconos": the panel is always up over the dock, following the focused app
-            bubbleShow[0].target = !sheetOpen && (zone == Z_WATCH || (zone == Z_SHELF && drawer.value < 0.02f
-                    && (watch != null || watchSwap))) ? 1 : 0;
-            if (Math.abs(bubbleShow[0].value - bubbleShow[0].target) > 0.001f) {
-                watchFading = true;
-                heroLayer.invalidate();
-            }
+        if (shelfUpMoving && iconDock()) {   // the wheel shrinks down while the bubble opens
+            layoutShelf();
+            tilesMoving = true;
         }
         boolean hintMoving = step(hintShow, dt), artMoving = step(artShow, dt);
         if (hintMoving) heroLayer.invalidate();
@@ -1785,6 +1781,14 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     private void setShelf(List<HomeApps.Item> list) {
         wake();
+        if (iconDock()) {   // the wheel ends in "Más apps" (All Apps)
+            boolean has = false;
+            for (HomeApps.Item it : list) has |= it.kind == HomeApps.ALL_APPS;
+            if (!has) {
+                list = new ArrayList<>(list);
+                list.add(HomeApps.action(HomeApps.ALL_APPS, "all", "Más apps", "apps"));
+            }
+        }
         cancelReorder(true);    // the list changed under the move (an app installed or removed)
         tileShaders = new LinearGradient[0];
         boolean same = list.size() == shelf.size();
@@ -1810,7 +1814,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     // Glass edition, the "Íconos" shelf (Ajustes de inicio, Estilo de la barra): small square icons in a carousel, the
     // focused one always in the middle (the row slides under it), the far ones fading; no glass bar.
     private final Spring[] dockScroll = {new Spring(0.32f, 0.86f, 0)};
-    private static final float DOCK_ICON = 100, DOCK_STEP = 132, DOCK_CY = 872;
+    private static final float DOCK_ICON = 150, DOCK_CY = 868, DOCK_R = 1500, DOCK_ANG = 8.6f;
     private boolean inFade;
 
     private boolean iconDock() {
@@ -1818,17 +1822,33 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     }
 
     private float dockAlpha(int i) {
-        float d = Math.abs(i - dockScroll[0].value);
-        return 1 - Ui.clamp((d - 3.2f) / 1.6f);
+        float d = Math.abs(dockOff(i));
+        return 1 - Ui.clamp((d - 2.3f) / 0.7f);
+    }
+
+    /** How far icon i is from the middle of the wheel, the short way round (the wheel has no ends). */
+    private float dockOff(int i) {
+        int n = Math.max(1, shelf.size());
+        float d = (i - dockScroll[0].value) % n;
+        if (d < -n / 2f) d += n;
+        if (d >= n / 2f) d -= n;
+        return d;
+    }
+
+    /** The wheel shrinks and drops while the bubble is open. */
+    private float dockOpen() {
+        return Ui.clamp(bubbleShow[0].value);
     }
 
     private void layoutShelf() {
         if (iconDock()) {
             int n = shelf.size();
-            float s = DOCK_ICON * k, cy = DOCK_CY * k, cx = w / 2f;
+            float o = dockOpen(), sc = 1 - 0.42f * o;
+            float s = DOCK_ICON * k * sc, cy = (DOCK_CY + 112 * o) * k, cx = w / 2f, r = DOCK_R * k * sc;
             for (int i = 0; i < n; i++) {
-                float x = cx + (i - dockScroll[0].value) * DOCK_STEP * k;
-                tileRects[i].set(x - s / 2, cy - s / 2, x + s / 2, cy + s / 2);
+                double a = Math.toRadians(dockOff(i) * DOCK_ANG);
+                float x = cx + r * (float) Math.sin(a), y = cy + r * (1 - (float) Math.cos(a));
+                tileRects[i].set(x - s / 2, y - s / 2, x + s / 2, y + s / 2);
             }
             platterRect.set(0, 0, 0, 0);
             return;
@@ -2242,7 +2262,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             }
         }
         HomeApps.Item it = shelf.get(i);
-        if (iconDock() && it.pkg != null && drawDockIcon(c, i, it)) return;
+        if (iconDock() && (it.pkg != null || it.kind == HomeApps.ALL_APPS) && drawDockIcon(c, i, it)) return;
         // Lifted to be moved: a little bigger than focused, with a deeper shadow.
         float l = i == liftIndex ? Math.max(0, moveLift.value) : 0;
         float f = tileFocus[i].value, fc = Ui.clamp(f), s = (1 + FOCUS_GROW * f + LIFT_GROW * l);
@@ -2315,7 +2335,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 dockName.setTextAlign(Paint.Align.CENTER);
                 dockName.setShadowLayer(8 * k, 0, 2 * k, 0x80000000);
             }
-            dockName.setAlpha(Math.round(255 * fc));
+            dockName.setAlpha(Math.round(255 * fc * (1 - 2 * dockOpen())));
             c.drawText(it.label == null ? "" : it.label, cell.centerX(), cell.bottom + 40 * k, dockName);
         }
     }
@@ -2350,26 +2370,47 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     /** The "Íconos" shelf: the app's icon on a rounded tile, rising and growing with the focus, its name under it. */
     private boolean drawDockIcon(Canvas c, int i, HomeApps.Item it) {
-        Bitmap icon = appIcon(it.pkg);
-        if (icon == null) return false;
-        float f = tileFocus[i].value, fc = Ui.clamp(f), dist = Math.min(3, Math.abs(i - dockScroll[0].value));
-        float s = (1 + 0.3f * f) * (1 - 0.1f * dist);
+        boolean more = it.kind == HomeApps.ALL_APPS;
+        Bitmap icon = more ? null : appIcon(it.pkg);
+        if (icon == null && !more) return false;
+        float off = dockOff(i), f = tileFocus[i].value, fc = Ui.clamp(f), dist = Math.min(3, Math.abs(off));
+        float s = (1 + 0.3f * f) * (1 - 0.12f * dist);
         RectF base = tileRects[i];
-        float half = base.width() * s / 2, cx = base.centerX(), cy = base.centerY() - 22 * k * f + 6 * k * dist, rad = 24 * k * s;
+        float half = base.width() * s / 2, cx = base.centerX(), cy = base.centerY() - 22 * k * f * (1 - dockOpen()), rad = 24 * k * s * base.width() / (DOCK_ICON * k);
+        int tilt = c.save();
+        c.rotate(off * DOCK_ANG * 0.45f, cx, cy);
         cell.set(cx - half, cy - half, cx + half, cy + half);
         tmp.set(cell);
         tmp.offset(0, (8 + 12 * fc) * k);
         shadow.setColor(Ui.alpha(0xFF000000, 0.3f + 0.25f * fc));
         shadows.draw(c, tmp, rad, SHADOW_BLUR * k, shadow);
         fill.setShader(null);
-        fill.setColor(0xFF1C1C1E);
-        c.drawRoundRect(cell, rad, rad, fill);
-        roundImage(c, icon, cell, rad);
+        if (more) {   // glass with a 3×3 grid of dots
+            fill.setColor(0x47FFFFFF);
+            c.drawRoundRect(cell, rad, rad, fill);
+            focusRing.setStrokeWidth(2 * k);
+            focusRing.setColor(0x8CFFFFFF);
+            c.drawRoundRect(cell, rad, rad, focusRing);
+            fill.setColor(0xFFFFFFFF);
+            float q = cell.width(), d = q * 0.09f;
+            for (int r = 0; r < 3; r++) for (int cc = 0; cc < 3; cc++) {
+                float px = cell.left + q * (0.3f + 0.2f * cc), py = cell.top + q * (0.3f + 0.2f * r);
+                tmp.set(px - d / 2, py - d / 2, px + d / 2, py + d / 2);
+                c.drawRoundRect(tmp, d * 0.25f, d * 0.25f, fill);
+            }
+        } else {
+            fill.setColor(0xFF1C1C1E);
+            c.drawRoundRect(cell, rad, rad, fill);
+            roundImage(c, icon, cell, rad);
+        }
         if (fc > 0.01f) {
             focusRing.setStrokeWidth(3.5f * k);
             focusRing.setColor(Ui.alpha(0xFFFFFFFF, 0.95f * fc));
             float o = 4 * k;
             c.drawRoundRect(cell.left - o, cell.top - o, cell.right + o, cell.bottom + o, rad + o, rad + o, focusRing);
+        }
+        c.restoreToCount(tilt);
+        if (fc > 0.01f && dockOpen() < 0.5f) {
             if (dockName == null) {
                 dockName = new TextPaint(Ui.text(Ui.semibold, 22 * k, 0xFFFFFFFF));
                 dockName.setTextAlign(Paint.Align.CENTER);
@@ -2914,14 +2955,16 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         boolean topChanged = aim(topFocus, !sheetOpen && zone == Z_TOP ? topIndex : -1, snap);
         heroChanged |= aim(cardFocus, !sheetOpen && zone == Z_CARDS ? cardIndex : -1, snap) | topChanged;
         heroChanged |= aim(recentFocus, !sheetOpen && zone == Z_RECENT ? recentIndex : -1, snap);
-        if (shelfIndex < shelf.size()) dockScroll[0].target = shelfIndex;
+        if (shelfIndex < shelf.size()) {   // the nearest turn of the wheel that has this app in the middle
+            int n = shelf.size();
+            dockScroll[0].target = shelfIndex + n * Math.round((dockScroll[0].target - shelfIndex) / n);
+        }
         if (snap) dockScroll[0].snap(dockScroll[0].target);
         boolean inBubble = !sheetOpen && zone == Z_WATCH;
         heroChanged |= aim(watchFocus, inBubble && watchRow == 0 ? watchIndex : -1, snap);
         heroChanged |= aim(actFocus, inBubble && watchRow == 1 ? actIndex : -1, snap);
         heroChanged |= aim(watchActive, inBubble ? 0 : -1, snap);
-        if (!iconDock()) heroChanged |= aim(bubbleShow, inBubble ? 0 : -1, snap);
-        else heroChanged = true;
+        heroChanged |= aim(bubbleShow, inBubble ? 0 : -1, snap);
         if (zone != Z_SHELF && zone != Z_WATCH) artShow[0].target = 0;   // the content background is the shelf's
         if (zone == Z_SHELF) heroChanged = true;   // the hint follows the focused app
         followWatch();
@@ -3358,7 +3401,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         switch (zone) {
             case Z_SHELF:
                 if (dx != 0) {
-                    int next = Math.max(0, Math.min(shelf.size() - 1, shelfIndex + dx));
+                    int next = iconDock() && shelf.size() > 1 ? (shelfIndex + dx + shelf.size()) % shelf.size()
+                            : Math.max(0, Math.min(shelf.size() - 1, shelfIndex + dx));
                     if (next == shelfIndex) return;
                     shelfIndex = next;
                 } else if (dy < 0) {
@@ -5002,6 +5046,145 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         c.drawText(what, pcx, tmp.centerY() + Ui.halfCap(panelPill), panelPill);
     }
 
+    private static final float BUB_W = 1000, BUB_H = 660, BUB_TOP = 186;
+    private TextPaint bubTitle, bubSub, bubHead, bubBig, bubBigSub;
+    private Object bubFor;
+    private final String[] bubTitles = new String[3], bubSubs = new String[3], bubBigTitles = new String[3];
+    private final String[] bubLists = new String[4];
+
+    /** "Íconos": the bubble that opens with ↑ (option C): the focused one big on the left, the rest beside it. */
+    private void drawBubble(Canvas c, WatchNext.Content wc) {
+        int n = Math.min(3, wc.items.size()), ns = panelSmallCount();
+        if (ns > 0) SpotifyLists.load(watchImageReady);
+        float x = (w - BUB_W * k) / 2, y = BUB_TOP * k, pw = BUB_W * k, ph = BUB_H * k;
+        float big = 440 * k, lx = x + 44 * k + big + 40 * k, lw = x + pw - 44 * k - lx;
+        if (bubTitle == null) {
+            bubTitle = new TextPaint(Ui.text(Ui.semibold, 26 * k, 0xFFFFFFFF));
+            bubSub = new TextPaint(Ui.text(Ui.regular, 21 * k, 0xB3FFFFFF));
+            bubHead = new TextPaint(Ui.text(Ui.semibold, 22 * k, 0xD9FFFFFF));
+            bubHead.setLetterSpacing(0.18f);
+            bubBig = new TextPaint(Ui.text(Ui.displaySemibold, 34 * k, 0xFFFFFFFF));
+            bubBig.setShadowLayer(10 * k, 0, 2 * k, 0x99000000);
+            bubBigSub = new TextPaint(Ui.text(Ui.regular, 23 * k, 0xD9FFFFFF));
+            bubBigSub.setShadowLayer(8 * k, 0, 2 * k, 0x99000000);
+        }
+        if (bubFor != wc) {   // the texts, cut to fit, once per content
+            bubFor = wc;
+            for (int i = 0; i < n; i++) {
+                WatchNext.Entry e = wc.items.get(i);
+                String t = e.title == null ? "" : e.title, sub = e.sub == null ? "" : e.sub;
+                bubTitles[i] = TextUtils.ellipsize(t, bubTitle, lw - 100 * k, TextUtils.TruncateAt.END).toString();
+                bubSubs[i] = TextUtils.ellipsize(sub, bubSub, lw - 100 * k, TextUtils.TruncateAt.END).toString();
+                bubBigTitles[i] = TextUtils.ellipsize(t, bubBig, big - 40 * k, TextUtils.TruncateAt.END).toString();
+            }
+            for (int i = 0; i < 4; i++) bubLists[i] = i < SpotifyLists.NAMES.length ? SpotifyLists.NAMES[i] : "";
+        }
+        panelRect.set(x, y, x + pw, y + ph);
+        tmp.set(panelRect);
+        tmp.offset(0, 18 * k);
+        shadow.setColor(Ui.alpha(0xFF000000, 0.4f));
+        shadows.draw(c, tmp, 44 * k, SHADOW_BLUR * 1.6f * k, shadow);
+        scene.liquid(c, panelRect, 44 * k, tone(0xFFFFFFFF, SMOKE), tone(0.55f, 0.5f), tone(0.02f, 0.01f), 12 * k, 8 * k,
+                tone(0.6f, 0.45f), 1);
+        // The heading, with a dot of the app's colour.
+        float hx = x + 44 * k, hb = y + 62 * k;
+        if (watchColor != 0xFFFFFFFF) {
+            fill.setShader(null);
+            fill.setColor(watchColor);
+            c.drawCircle(hx + 7 * k, hb - Ui.halfCap(bubHead), 7 * k, fill);
+            hx += 26 * k;
+        }
+        c.drawText(wc.header.toUpperCase(Ui.locale()), hx, hb, bubHead);
+        // The big cover: the one in focus (the first while the playlists have it).
+        int bi = Math.max(0, Math.min(n - 1, watchIndex));
+        WatchNext.Entry be = wc.items.get(bi);
+        cell.set(x + 44 * k, y + 92 * k, x + 44 * k + big, y + 92 * k + big);
+        float rad = 26 * k;
+        tmp.set(cell);
+        tmp.offset(0, 14 * k);
+        shadow.setColor(0x66000000);
+        shadows.draw(c, tmp, rad, SHADOW_BLUR * 1.4f * k, shadow);
+        if (be.bitmap != null) cropImage(c, be.bitmap, cell, rad);
+        else drawWatchImage(c, be, cell, rad, 1);
+        if (cardFade == null) {
+            cardFade = new Paint(Paint.ANTI_ALIAS_FLAG);
+            cardFade.setShader(new android.graphics.LinearGradient(0, 0, 0, 1, 0x00000000, 0xD0000000, Shader.TileMode.CLAMP));
+            cardFadeM = new android.graphics.Matrix();
+        }
+        float ft = cell.top + cell.height() * 0.55f;
+        cardFadeM.setScale(1, cell.bottom - ft);
+        cardFadeM.postTranslate(0, ft);
+        cardFade.getShader().setLocalMatrix(cardFadeM);
+        c.save();
+        c.clipRect(cell.left, ft, cell.right, cell.bottom);
+        c.drawRoundRect(cell, rad, rad, cardFade);
+        c.restore();
+        String bt = bubBigTitles[bi] == null ? "" : bubBigTitles[bi];
+        c.drawText(bt, cell.left + 22 * k, cell.bottom - 54 * k, bubBig);
+        String bs = bubSubs[bi] == null ? "" : bubSubs[bi];
+        c.drawText(bs, cell.left + 22 * k, cell.bottom - 22 * k, bubBigSub);
+        float row0 = watchRow == 0 ? 1 : 0;
+        if (row0 > 0) {
+            focusRing.setStrokeWidth(4 * k);
+            focusRing.setColor(0xF2FFFFFF);
+            float o = 5 * k;
+            c.drawRoundRect(cell.left - o, cell.top - o, cell.right + o, cell.bottom + o, rad + o, rad + o, focusRing);
+        }
+        // Under it: how far you got.
+        if (watchProgress[bi] > 0) {
+            float by = cell.bottom + 30 * k, bh = 10 * k;
+            fill.setShader(null);
+            fill.setColor(0x4DFFFFFF);
+            tmp.set(cell.left, by, cell.right, by + bh);
+            c.drawRoundRect(tmp, bh / 2, bh / 2, fill);
+            fill.setColor(0xFFFFFFFF);
+            tmp.right = tmp.left + Math.max(bh, cell.width() * watchProgress[bi]);
+            c.drawRoundRect(tmp, bh / 2, bh / 2, fill);
+        }
+        // The list, beside it.
+        float ly = y + 120 * k;
+        c.drawText("MÁS PARA SEGUIR", lx, ly, bubHead);
+        for (int i = 0; i < n; i++) {
+            float ry = ly + 22 * k + i * 96 * k, f = Ui.clamp(watchFocus[i].value);
+            if (f > 0.01f) {
+                fill.setShader(null);
+                fill.setColor(Ui.alpha(0x2EFFFFFF, f));
+                tmp.set(lx - 12 * k, ry - 8 * k, lx + lw + 4 * k, ry + 84 * k);
+                c.drawRoundRect(tmp, 16 * k, 16 * k, fill);
+            }
+            WatchNext.Entry e = wc.items.get(i);
+            tmp.set(lx, ry, lx + 76 * k, ry + 76 * k);
+            if (e.bitmap != null) cropImage(c, e.bitmap, tmp, 12 * k);
+            else drawWatchImage(c, e, new RectF(tmp), 12 * k, 1);
+            c.drawText(bubTitles[i] == null ? "" : bubTitles[i], lx + 96 * k, ry + 34 * k, bubTitle);
+            c.drawText(bubSubs[i] == null ? "" : bubSubs[i], lx + 96 * k, ry + 64 * k, bubSub);
+        }
+        // Spotify: its popular playlists, under the list.
+        if (ns > 0) {
+            float py = y + 470 * k, item = 88 * k, step = 102 * k;
+            c.drawText("PLAYLISTS POPULARES", lx, py, bubHead);
+            for (int i = 0; i < ns; i++) {
+                float f = Ui.clamp(actFocus[i].value);
+                cell.set(lx + i * step, py + 22 * k, lx + i * step + item, py + 22 * k + item);
+                Bitmap b = SpotifyLists.covers[i];
+                if (b != null) roundImage(c, b, cell, 14 * k);
+                else {
+                    fill.setShader(null);
+                    fill.setColor(0x24FFFFFF);
+                    c.drawRoundRect(cell, 14 * k, 14 * k, fill);
+                }
+                if (f > 0.01f) {
+                    focusRing.setStrokeWidth(4 * k);
+                    focusRing.setColor(Ui.alpha(0xFFFFFFFF, 0.95f * f));
+                    c.drawRoundRect(cell.left - 5 * k, cell.top - 5 * k, cell.right + 5 * k, cell.bottom + 5 * k, 19 * k, 19 * k, focusRing);
+                }
+            }
+            int at = watchRow == 1 ? Math.max(0, Math.min(ns - 1, actIndex)) : 0;
+            c.drawText(watchRow == 1 ? bubLists[at] : "Top 50 Argentina · Viva Latino · …", lx, py + 22 * k + item + 40 * k,
+                    watchRow == 1 ? bubTitle : bubSub);
+        }
+    }
+
     private void placeWatchCards() {
         WatchNext.Content c = watch;
         if (c == null) return;
@@ -5053,8 +5236,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private void drawWatch(Canvas c) {
         WatchNext.Content wc = watch;
         if (wc == null) return;
+        if (iconDock()) {
+            drawBubble(c, wc);
+            return;
+        }
         placeWatchCards();
-        if (iconDock()) drawPanelGlass(c, wc);
         // The heading, with a dot of the app's colour.
         float hx = watchHeadX, hb = iconDock() ? (PANEL_TOP - 30) * k : TS_HEAD * k;
         if (watchColor != 0xFFFFFFFF) {
@@ -6168,6 +6354,18 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 }
                 break;
             case Z_WATCH:
+                if (iconDock() && watchRow == 0) {
+                    int n = Math.min(3, watch.items.size());
+                    if (dx != 0) return true;
+                    if (dy < 0 && watchIndex > 0) {
+                        watchIndex--;
+                        break;
+                    }
+                    if (dy > 0 && watchIndex < n - 1) {
+                        watchIndex++;
+                        break;
+                    }
+                }
                 if (dx != 0 && watchRow == 1) {
                     int next = Math.max(0, Math.min(panelSmallCount() - 1, actIndex + dx));
                     if (next == actIndex) return true;
@@ -6179,6 +6377,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 } else if (dy < 0) {
                     if (watchRow == 1) {
                         watchRow = 0;   // back up to the big cards
+                        if (iconDock()) watchIndex = Math.min(3, watch.items.size()) - 1;
                     } else {
                         zone = Z_TOP;
                         topIndex = 3;
