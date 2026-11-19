@@ -188,7 +188,7 @@ final class WatchNext {
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
         conn.setConnectTimeout(8000);
         conn.setReadTimeout(10000);
-        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 11) TVdeMati/1.0");
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 11) FreeMyTVGlass/1.0");
         try (InputStream in = conn.getInputStream()) {
             return readAll(in);
         } finally {

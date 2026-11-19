@@ -365,8 +365,8 @@ public class SettingsActivity extends Activity {
             // On the left: big symbol, title, description.
             float cx = 500 * k;
             Symbols.draw(getContext(), c, "sparkles", cx, 400 * k, 150 * k, 0xEBFFFFFF);
-            c.drawText("TV de Mati", cx, 612 * k, title);
-            c.drawText("Ajustada bajo los gustos y los requerimientos del Buen Mati", cx, 660 * k, subtitle);
+            c.drawText("Free My TV Glass", cx, 612 * k, title);
+            c.drawText("Tu inicio de vidrio, a tu manera", cx, 660 * k, subtitle);
             c.drawText(versionName(getContext()), cx, 704 * k, version);
 
             if (screen == MAIN) drawMain(c, seconds); else if (screen == HOME_CHOICE) drawChoice(c); else if (screen == PICKER) drawPicker(c); else if (screen == SHELF_EDIT) drawShelfEditor(c); else drawList(c);

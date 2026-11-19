@@ -75,7 +75,7 @@ final class Gallery {
 
     private static final String API = "https://commons.wikimedia.org/w/api.php";
     /** Wikimedia asks every client to say who it is. */
-    private static final String AGENT = "TVdeMati/1.0 (Android TV home screen; Free My TV fork)";
+    private static final String AGENT = "FreeMyTVGlass/1.0 (Android TV home screen; Free My TV fork)";
     private static final long LIST_EVERY = 7 * 24 * 3600_000L;
     private static final int KEEP_IMAGES = 40;
     /** Per kind: the sharpest originals only (quality over quantity). */
