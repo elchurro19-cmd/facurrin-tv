@@ -4990,7 +4990,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     /** The cover as the card's picture, and its colour on the progress (made once per song). */
     private final android.graphics.Matrix npcGlowMatrix = new android.graphics.Matrix();
     private int npcGlowVersion = -1, npcAccent = 0xFFFFFFFF;
-    private float npcArtAt = Float.NaN;
+    private float npcArtAt = Float.NaN, npcFadeAt = Float.NaN;
+    private int npcFadeVersion = -1;
     private final Paint npcArtPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private android.graphics.LinearGradient npcScrim, npcFoot;
     private final RectF npCard = new RectF(), npMorph = new RectF(), npFullRect = new RectF();
@@ -5097,43 +5098,50 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
         c.save();
         c.clipPath(npShape);
-        // The cover, top left, lifted off the glass by its own shadow.
-        float pad = 24 * k, cs = 184 * k;
-        cell.set(L + pad, T + pad, L + pad + cs, T + pad + cs);
-        tmp.set(cell);
-        tmp.offset(0, 10 * k);
-        shadow.setColor(Ui.alpha(0xFF000000, 0.5f * te));
-        shadows.draw(c, tmp, 18 * k, SHADOW_BLUR * k, shadow);
+        // Option LB: the cover big on the left, the L's whole height, fading into the glass towards the right (made
+        // once per song); the song, the bar and the controls beside it, under the round buttons.
+        float hh = B - T;
         Bitmap art = np.artLarge != null ? np.artLarge : np.art;
-        if (art != null) {
-            int alpha = Math.round(255 * te);
-            bitmapPaint.setAlpha(alpha);
-            imageFill.setAlpha(alpha);
-            roundImage(c, art, cell, 18 * k);
-            bitmapPaint.setAlpha(255);
-            imageFill.setAlpha(255);
+        if (np.version != npcFadeVersion || npcFadeAt != L + T + hh) {
+            npcFadeVersion = np.version;
+            npcFadeAt = L + T + hh;
+            npcArtPaint.setShader(null);
+            if (art != null && art.getWidth() > 0 && art.getHeight() > 0) {
+                android.graphics.Matrix m = new android.graphics.Matrix();
+                float sc = Math.max(hh / art.getWidth(), hh / art.getHeight());
+                m.setScale(sc, sc);
+                m.postTranslate(L + hh / 2 - art.getWidth() * sc / 2, T + hh / 2 - art.getHeight() * sc / 2);
+                BitmapShader sh = new BitmapShader(art, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+                sh.setLocalMatrix(m);
+                android.graphics.LinearGradient fade = new android.graphics.LinearGradient(L + hh * 0.42f, 0, L + hh, 0,
+                        0xFF000000, 0x00000000, Shader.TileMode.CLAMP);
+                npcArtPaint.setShader(new android.graphics.ComposeShader(sh, fade, android.graphics.PorterDuff.Mode.DST_IN));
+            }
+        }
+        if (npcArtPaint.getShader() != null) {
+            npcArtPaint.setAlpha(Math.round(255 * te));
+            c.drawRect(L, T, L + hh, B, npcArtPaint);
         } else {
             fill.setColor(Ui.alpha(0x24FFFFFF, te));
-            c.drawRoundRect(cell, 18 * k, 18 * k, fill);
+            c.drawRect(L, T, L + hh * 0.7f, B, fill);
         }
-        // The song beside the cover, in the capsule's row; where it plays under it.
-        float tx = cell.right + 26 * k, tw = NX - 18 * k - tx;
+        float tx = L + hh * 0.86f, tw = R - 34 * k - tx;
         if (np.version != npcVersion) {
             npcVersion = np.version;
             npcTitleText = TextUtils.ellipsize(np.title, npcTitle, tw, TextUtils.TruncateAt.END);
-            npcArtistText = TextUtils.ellipsize(np.artist, npcArtist, tw, TextUtils.TruncateAt.END);
             String app = np.pkg == null ? "" : shelfLabel(np.pkg);
-            npcLabelText = (app.isEmpty() || app.equals(np.pkg) ? "" : app + "  ·  ") + "Esta tele";
+            String who = np.artist + (app.isEmpty() || app.equals(np.pkg) ? "" : "  ·  " + app);
+            npcArtistText = TextUtils.ellipsize(who, npcArtist, tw, TextUtils.TruncateAt.END);
+            npcLabelText = "";
+            for (Paint sp : new Paint[] {npcTitle, npcArtist, npcTime}) sp.setShadowLayer(10 * k, 0, 2 * k, 0x80000000);
         }
         npcTitle.setColor(Ui.alpha(0xFFFFFFFF, te));
-        c.drawText(npcTitleText, 0, npcTitleText.length(), tx, T + 58 * k, npcTitle);
+        c.drawText(npcTitleText, 0, npcTitleText.length(), tx, NY + 58 * k, npcTitle);
         npcArtist.setColor(Ui.alpha(0xCCFFFFFF, te));
-        c.drawText(npcArtistText, 0, npcArtistText.length(), tx, T + 96 * k, npcArtist);
-        npcLabel.setColor(Ui.alpha(0xB3FFFFFF, te));
-        c.drawText(npcLabelText, tx, NY + 52 * k, npcLabel);
+        c.drawText(npcArtistText, 0, npcArtistText.length(), tx, NY + 98 * k, npcArtist);
         // The progress, across the body beside the cover: the song's colour with its hill of sound, the knob, times.
         float p = scrubTo >= 0 && np.duration > 0 ? Ui.clamp(scrubTo / (float) np.duration) : Ui.clamp(np.progress());
-        float by = T + 268 * k, bh = 12 * k;
+        float by = NY + 150 * k, bh = 12 * k;
         float a0 = tx, a1 = R - 34 * k, head = a0 + (a1 - a0) * p;
         fill.setColor(Ui.alpha(0x47FFFFFF, te));
         tmp.set(a0, by - bh / 2, a1, by + bh / 2);
