@@ -3645,8 +3645,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             click.open();
             android.content.Intent in;
             if (actIndex == 0) in = getContext().getPackageManager().getLeanbackLaunchIntentForPackage(SpotifyLists.PKG);
-            else if (actIndex == 1) in = new android.content.Intent(android.content.Intent.ACTION_VIEW,
-                    android.net.Uri.parse("spotify:collection")).setPackage(SpotifyLists.PKG);
+            else if (actIndex == 1) in = getContext().getPackageManager().getLeanbackLaunchIntentForPackage(SpotifyLists.PKG);
+            // (spotify:collection plays Liked Songs on the TV app instead of showing the library)
             else in = SpotifyLists.open(actIndex - 2);
             try {
                 if (in != null) getContext().startActivity(in.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
@@ -5410,6 +5410,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
     }
 
+    private Paint spotArc;
+    private android.graphics.Path spotPath;
     private static final int SPOT_ITEMS = 6;   // now playing, 4 playlists, the library
     private int spotVersion = -1;
     private String spotTitle = "", spotArtist = "";
@@ -5472,9 +5474,28 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         float sTop = top, under = top + small + 44 * k;
         spotTile(c, 1, x, sTop, small, null, 16 * k);
         float cx = x + small / 2, cy = sTop + small / 2 - 6 * k * Ui.clamp(actFocus[1].value);
-        Symbols.draw(getContext(), c, "library_music", cx, cy, 72 * k, 0xFFFFFFFF);
+        // Spotify's mark, drawn: a green disc with three dark arcs.
+        float rr = small * 0.26f;
+        fill.setShader(null);
+        fill.setColor(0xFF1ED760);
+        c.drawCircle(cx, cy, rr, fill);
+        if (spotArc == null) {
+            spotArc = new Paint(Paint.ANTI_ALIAS_FLAG);
+            spotArc.setStyle(Paint.Style.STROKE);
+            spotArc.setStrokeCap(Paint.Cap.ROUND);
+            spotArc.setColor(0xFF121212);
+            spotPath = new android.graphics.Path();
+        }
+        for (int j = 0; j < 3; j++) {
+            float hw = rr * (0.62f - 0.1f * j), y0 = cy - rr * 0.28f + j * rr * 0.3f;
+            spotArc.setStrokeWidth(rr * (0.15f - 0.025f * j));
+            spotPath.reset();
+            spotPath.moveTo(cx - hw, y0);
+            spotPath.quadTo(cx, y0 - rr * 0.22f, cx + hw, y0 + rr * 0.08f);
+            c.drawPath(spotPath, spotArc);
+        }
         watchSub.setAlpha(Ui.clamp(actFocus[1].value) > 0.5f ? 255 : 199);
-        c.drawText("Tu biblioteca", x, under, watchSub);
+        c.drawText("Abrir Spotify", x, under, watchSub);
         x += small + gap;
         c.drawText("PLAYLISTS", x, hb, watchHead);
         for (int i = 0; i < 4; i++) {
