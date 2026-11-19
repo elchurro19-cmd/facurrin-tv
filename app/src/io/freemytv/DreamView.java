@@ -862,6 +862,12 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
      */
     private boolean musicKey(android.view.KeyEvent e) {
         int code = e.getKeyCode();
+        // The controls hide after a few seconds; the first key only brings them back (Back still ends it).
+        long nowKey = SystemClock.uptimeMillis();
+        boolean hidden = nowKey - darkKeyAt > CTRL_SHOW_MS + CTRL_FADE_MS;
+        darkKeyAt = nowKey;
+        invalidate();
+        if (hidden && code != android.view.KeyEvent.KEYCODE_BACK) return true;
         NowPlaying np = nowPlaying;
         boolean ok = code == android.view.KeyEvent.KEYCODE_DPAD_CENTER || code == android.view.KeyEvent.KEYCODE_ENTER
                 || code == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER;
@@ -904,9 +910,11 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
 
     private android.text.TextPaint mClock, mDate, mDim, mHint;
     private long darkKeyAt;
+    private static final long CTRL_SHOW_MS = 5000, CTRL_FADE_MS = 600;   // the controls stay 5 s after a key
 
     private void drawMusicScreen(Canvas c) {
         boolean on = musicOn();
+        if (on && musicShow <= 0.01f) darkKeyAt = SystemClock.uptimeMillis();
         musicShow += ((on ? 1 : 0) - musicShow) * 0.15f;
         if (Math.abs((on ? 1 : 0) - musicShow) < 0.01f) musicShow = on ? 1 : 0;
         if (musicShow <= 0.01f) return;
@@ -1061,7 +1069,10 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
         mTime.setAlpha(Math.round((dk ? 75 : 204) * a));
         c.drawText(done, tx, by + 44 * k, mTime);
         c.drawText(total, tr - mTime.measureText(total), by + 44 * k, mTime);
-        float ca = a;   // the controls stay, dark too
+        // The controls: 5 s after the last key they fade away (light and dark); any arrow brings them back.
+        long since = SystemClock.uptimeMillis() - darkKeyAt;
+        float ca = a * Ui.clamp(1 - (since - CTRL_SHOW_MS) / (float) CTRL_FADE_MS);
+        boolean ctrlFading = since > CTRL_SHOW_MS - 100 && since < CTRL_SHOW_MS + CTRL_FADE_MS + 100;
         // The controls: previous, play and next in a glass pill, shuffle and repeat on its sides; the moon at the end.
         float cy = ct + 330 * k, mid = tx + 360 * k, step = 96 * k, ph = 84 * k, pw = 2 * step + 90 * k;
         mRect.set(mid - pw / 2, cy - ph / 2, mid + pw / 2, cy + ph / 2);
@@ -1096,10 +1107,10 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
                     cx, cy, (i == MC_PLAY ? 20 : 15) * k, Ui.alpha(ink, ca));
         }
         if (dk) {
-            postInvalidateDelayed(1000);   // no legend: the buttons are on screen
+            postInvalidateDelayed(ctrlFading ? 40 : since < CTRL_SHOW_MS ? CTRL_SHOW_MS - since : 1000);
             return;
         }
-        postInvalidateDelayed(np.playing ? 50 : 500);   // the hill rolls; paused, the times still tick
+        postInvalidateDelayed(np.playing || ctrlFading ? 50 : 500);   // the hill rolls; paused, the times still tick
     }
 
     private static String time(float ms) {
