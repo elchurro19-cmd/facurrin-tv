@@ -2724,7 +2724,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 x += iw + gap;
             }
             futbolCard.set((w - 1040 * k) / 2, CARDS_TOP * k, (w + 1040 * k) / 2, (CARDS_TOP + CARDS_H) * k);
-            weatherCard.set(0, 0, 0, 0);
+            weatherCard.set(futbolCard);   // the weather's card opens in the same place, under the buttons
             drawerDirty = true;
             return;
         }
@@ -2808,6 +2808,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         if (drawerPanel != 1) {   // D2: the wide buttons, and the team's card under them when it's open
             for (int i = 0; i < drawerItems.size(); i++) drawDrawerButton(c, i);
             if (drawerPanel == 2 && Prefs.futbol()) drawFutbolCard(c, futbolCard);
+            if (drawerPanel == 3 && Prefs.weather()) drawWeatherCard(c, weatherCard);
             return;
         }
         int top = -1;
@@ -3505,7 +3506,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             click.move();
             return;
         }
-        if (!sheetOpen && (zone == Z_DRAWER || zone == Z_FUTBOL) && drawerPanel != 0) {
+        if (!sheetOpen && (zone == Z_DRAWER || zone == Z_FUTBOL || zone == Z_WEATHER) && drawerPanel != 0) {
             if (drawerPanel == 1) unfoldInputs(false);
             drawerPanel = 0;
             zone = Z_DRAWER;
@@ -3653,6 +3654,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                     drawerIndex = next;
                 } else if (dy < 0) {
                     closeDrawer();
+                } else if (drawerPanel == 3 && Prefs.weather() && !talkBack()) {
+                    zone = Z_WEATHER;   // down onto the weather's card (OK turns its pages)
+                    cardEngaged = false;
                 } else if (drawerPanel == 2 && Prefs.futbol() && !talkBack()) {
                     zone = Z_FUTBOL;   // down onto the team's card
                     cardEngaged = false;
@@ -3755,12 +3759,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 retarget(false);
                 return;
             }
-            if (it.kind == WX_KIND) {
+            if (it.kind == WX_KIND) {   // the weather's card opens (or closes) under the buttons
                 click.open();
-                closeDrawer();
-                zone = Z_WXBTN;
-                wxOpen = true;
-                retarget(false);
+                drawerPanel = drawerPanel == 3 ? 0 : 3;
+                weatherPage = 0;
+                drawerDirty = true;
                 return;
             }
             if (it.kind == TEAM_KIND) {   // the team's card opens (or closes) under the buttons
