@@ -1290,7 +1290,15 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         if (shelfUpMoving) heroLayer.invalidate();   // the clock shrinks as the app's shelf comes up
         boolean watchFading = step(watchShow, dt) | step(watchActive, dt) | shelfUpMoving;
         // The shelf's hint (passing over an app) and the content background (resting on it).
-        hintShow[0].target = !sheetOpen && zone == Z_SHELF && drawer.value < 0.02f && watchShown() ? 1 : 0;
+        hintShow[0].target = !iconDock() && !sheetOpen && zone == Z_SHELF && drawer.value < 0.02f && watchShown() ? 1 : 0;
+        if (iconDock()) {   // "Íconos": the panel is always up over the dock, following the focused app
+            bubbleShow[0].target = !sheetOpen && (zone == Z_WATCH || (zone == Z_SHELF && drawer.value < 0.02f
+                    && (watch != null || watchSwap))) ? 1 : 0;
+            if (Math.abs(bubbleShow[0].value - bubbleShow[0].target) > 0.001f) {
+                watchFading = true;
+                heroLayer.invalidate();
+            }
+        }
         boolean hintMoving = step(hintShow, dt), artMoving = step(artShow, dt);
         if (hintMoving) heroLayer.invalidate();
         if (artMoving) {
@@ -1802,7 +1810,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     // Glass edition, the "Íconos" shelf (Ajustes de inicio, Estilo de la barra): small square icons in a carousel, the
     // focused one always in the middle (the row slides under it), the far ones fading; no glass bar.
     private final Spring[] dockScroll = {new Spring(0.32f, 0.86f, 0)};
-    private static final float DOCK_ICON = 124, DOCK_STEP = 168, DOCK_CY = 872;
+    private static final float DOCK_ICON = 100, DOCK_STEP = 132, DOCK_CY = 872;
     private boolean inFade;
 
     private boolean iconDock() {
@@ -2344,9 +2352,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private boolean drawDockIcon(Canvas c, int i, HomeApps.Item it) {
         Bitmap icon = appIcon(it.pkg);
         if (icon == null) return false;
-        float f = tileFocus[i].value, fc = Ui.clamp(f), s = 1 + 0.18f * f;
+        float f = tileFocus[i].value, fc = Ui.clamp(f), dist = Math.min(3, Math.abs(i - dockScroll[0].value));
+        float s = (1 + 0.3f * f) * (1 - 0.1f * dist);
         RectF base = tileRects[i];
-        float half = base.width() * s / 2, cx = base.centerX(), cy = base.centerY() - 14 * k * f, rad = 28 * k * s;
+        float half = base.width() * s / 2, cx = base.centerX(), cy = base.centerY() - 22 * k * f + 6 * k * dist, rad = 24 * k * s;
         cell.set(cx - half, cy - half, cx + half, cy + half);
         tmp.set(cell);
         tmp.offset(0, (8 + 12 * fc) * k);
@@ -2911,7 +2920,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         heroChanged |= aim(watchFocus, inBubble && watchRow == 0 ? watchIndex : -1, snap);
         heroChanged |= aim(actFocus, inBubble && watchRow == 1 ? actIndex : -1, snap);
         heroChanged |= aim(watchActive, inBubble ? 0 : -1, snap);
-        heroChanged |= aim(bubbleShow, inBubble ? 0 : -1, snap);
+        if (!iconDock()) heroChanged |= aim(bubbleShow, inBubble ? 0 : -1, snap);
+        else heroChanged = true;
         if (zone != Z_SHELF && zone != Z_WATCH) artShow[0].target = 0;   // the content background is the shelf's
         if (zone == Z_SHELF) heroChanged = true;   // the hint follows the focused app
         followWatch();
@@ -4916,14 +4926,16 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     }
 
     /** Each card's place for the focus as it is now: the focused one wide, the others narrow (they follow the spring). */
-    private static final float PANEL_SCALE = 0.7f, PANEL_TOP = 212, PANEL_MIN_W = 900;
+    private static final float PANEL_SCALE = 0.95f, PANEL_TOP = 212, PANEL_MIN_W = 1040;
     private TextPaint panelSmall, panelPill;
+    private Paint cardFade;
+    private android.graphics.Matrix cardFadeM;
     private final RectF panelRect = new RectF();
 
     /** The playlists under the cards (Spotify only, on the "Íconos" shelf). */
     private int panelSmallCount() {
         WatchNext.Content c = watch;
-        return iconDock() && c != null && SpotifyLists.PKG.equals(c.pkg) ? SpotifyLists.IDS.length : 0;
+        return iconDock() && c != null && SpotifyLists.PKG.equals(c.pkg) ? 4 : 0;
     }
 
     /**
@@ -4933,9 +4945,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private void drawPanelGlass(Canvas c, WatchNext.Content wc) {
         int ns = panelSmallCount();
         if (ns > 0) SpotifyLists.load(watchImageReady);
-        float pad = 34 * k, item = 92 * k;
-        float smallTop = watchCard.bottom + 44 * k;
-        float bottom = ns > 0 ? smallTop + item + 64 * k : watchCard.bottom;
+        float pad = 34 * k, item = 64 * k, cardsBottom = watchCard.top;
+        for (int i = 0; i < Math.min(3, wc.items.size()); i++) cardsBottom = Math.max(cardsBottom, watchRects[i].bottom);
+        float smallTop = cardsBottom + 70 * k;
+        float bottom = ns > 0 ? smallTop + item + 40 * k : cardsBottom + pad;
         panelRect.set(watchCard.left - pad, watchCard.top - 20 * k, Math.max(watchCard.right, watchCard.left + PANEL_MIN_W * k) + pad, bottom);
         tmp.set(panelRect);
         tmp.offset(0, 18 * k);
@@ -4954,7 +4967,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         if (ns > 0) {   // "Playlists populares", the covers in a row, their names under them
             watchHead.setAlpha(217);
             c.drawText("PLAYLISTS POPULARES", watchCard.left, smallTop - 2 * k, watchHead);
-            float x = watchCard.left, step = item + 66 * k;
+            float inner = Math.max(watchCard.right, watchCard.left + PANEL_MIN_W * k) - watchCard.left;
+            float x = watchCard.left, step = inner / ns;
             for (int i = 0; i < ns; i++) {
                 float f = Ui.clamp(actFocus[i].value);
                 cell.set(x, smallTop + 14 * k, x + item, smallTop + 14 * k + item);
@@ -4969,8 +4983,13 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                     focusRing.setColor(Ui.alpha(0xFFFFFFFF, 0.95f * f));
                     c.drawRoundRect(cell.left - 5 * k, cell.top - 5 * k, cell.right + 5 * k, cell.bottom + 5 * k, 14 * k, 14 * k, focusRing);
                 }
-                c.drawText(TextUtils.ellipsize(SpotifyLists.NAMES[i], panelSmall, step - 12 * k, TextUtils.TruncateAt.END).toString(),
-                        x, cell.bottom + 28 * k, panelSmall);
+                float tx = cell.right + 12 * k, tw = step - item - 24 * k;
+                panelSmall.setAlpha(255);
+                c.drawText(TextUtils.ellipsize(SpotifyLists.NAMES[i], panelSmall, tw, TextUtils.TruncateAt.END).toString(),
+                        tx, cell.centerY() - 4 * k, panelSmall);
+                panelSmall.setAlpha(165);
+                c.drawText(TextUtils.ellipsize("Playlist · Spotify", panelSmall, tw, TextUtils.TruncateAt.END).toString(), tx, cell.centerY() + 22 * k, panelSmall);
+                panelSmall.setAlpha(255);
                 x += step;
             }
         }
@@ -5001,7 +5020,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             if (i == 0) f = Math.max(f, 1 - any);
             total += small + (big - small) * f + (i > 0 ? TS_GAP * k : 0);
         }
-        float x = iconDock() ? (w - Math.max(total, PANEL_MIN_W * k)) / 2 + Math.max(0, (PANEL_MIN_W * k - total) / 2) : TS_LEFT * k;
+        float x = iconDock() ? (w - Math.max(total, PANEL_MIN_W * k)) / 2 : TS_LEFT * k;
         float top = (iconDock() ? PANEL_TOP : TS_TOP) * k;
         float x0 = x;
         for (int i = 0; i < n; i++) {
@@ -5078,6 +5097,33 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 watchRim.setColor(Ui.alpha(0xFFFFFFFF, 0.95f * f));
                 float o = 2 * k;
                 c.drawRoundRect(cell.left - o, cell.top - o, cell.right + o, cell.bottom + o, rad + o, rad + o, watchRim);
+            }
+            if (iconDock()) {   // the title on the picture, over a dark fade at its foot
+                if (cardFade == null) {
+                    cardFade = new Paint(Paint.ANTI_ALIAS_FLAG);
+                    cardFade.setShader(new android.graphics.LinearGradient(0, 0, 0, 1, 0x00000000, 0xD0000000, Shader.TileMode.CLAMP));
+                    cardFadeM = new android.graphics.Matrix();
+                }
+                float ft = cell.top + cell.height() * 0.45f;
+                cardFadeM.setScale(1, cell.bottom - ft);
+                cardFadeM.postTranslate(0, ft);
+                cardFade.getShader().setLocalMatrix(cardFadeM);
+                c.save();
+                tmp.set(cell);
+                c.clipRect(cell.left, ft, cell.right, cell.bottom);
+                c.drawRoundRect(tmp, rad, rad, cardFade);
+                c.restore();
+                float pad = 16 * k, tb = cell.bottom - pad - (f > 0.01f ? 30 * k : 0);
+                c.save();
+                c.clipRect(cell);
+                watchTitle.setAlpha(255);
+                c.drawText(f > 0.5f ? watchTitlesBig[i] : watchTitles[i], cell.left + pad, tb, watchTitle);
+                if (f > 0.01f) {
+                    watchSub.setAlpha(Math.round(220 * f));
+                    c.drawText(watchSubs[i], cell.left + pad, tb + 30 * k, watchSub);
+                }
+                c.restore();
+                continue;
             }
             // Under it: the title (whole on the wide card), and its details only on the focused one.
             float base = r.bottom + 44 * k;
@@ -6084,6 +6130,12 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             case Z_SHELF:
                 // Up from an empty shelf too: move()'s older zones (the hero, the corner capsule) aren't drawn any more.
                 if (dy >= 0) return false;
+                if (iconDock() && !watchShown()) {   // the panel may still be on its way: bring it now
+                    handler.removeCallbacks(watchDebounce);
+                    pickWatch();
+                    if (watchSwap) showWatch(watchWaiting);
+                    if (watch != null) watchShow[0].snap(1);
+                }
                 if (watchShown()) {
                     zone = Z_WATCH;   // the bubble rises from the app, on its first card
                     watchIndex = 0;
