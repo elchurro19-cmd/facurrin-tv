@@ -3641,6 +3641,19 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             }
             click.open();
             return;
+        } else if (zone == Z_WATCH && spotRow()) {
+            click.open();
+            android.content.Intent in;
+            if (actIndex == 0) in = getContext().getPackageManager().getLeanbackLaunchIntentForPackage(SpotifyLists.PKG);
+            else if (actIndex <= 4) in = SpotifyLists.open(actIndex - 1);
+            else in = new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("spotify:collection"))
+                    .setPackage(SpotifyLists.PKG);
+            try {
+                if (in != null) getContext().startActivity(in.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+            } catch (RuntimeException e) {
+                AppLog.w("spotify row: " + e.getMessage());
+            }
+            return;
         } else if (zone == Z_WATCH && watchRow == 1 && panelSmallCount() > 0) {
             click.open();   // a playlist: straight into Spotify
             try {
@@ -5311,7 +5324,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             drawBubble(c, wc);
             return;
         }
-        drawCardPlaylists(c);
+        if (spotRow()) {
+            drawSpotifyRow(c, wc);
+            return;
+        }
         placeWatchCards();
         // The heading, with a dot of the app's colour.
         float hx = watchHeadX, hb = iconDock() ? (PANEL_TOP - 30) * k : TS_HEAD * k;
@@ -5391,6 +5407,106 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 watchSub.setAlpha(Math.round(199 * f));
                 c.drawText(watchSubs[i], r.left, base + 32 * k, watchSub);
             }
+        }
+    }
+
+    private static final int SPOT_ITEMS = 6;   // now playing, 4 playlists, the library
+    private int spotVersion = -1;
+    private String spotTitle = "", spotArtist = "";
+    private final String[] spotNames = new String[4];
+
+    /** Spotify with the cards style: its bubble is one row of its own. */
+    private boolean spotRow() {
+        WatchNext.Content c = watch;
+        return !iconDock() && c != null && SpotifyLists.PKG.equals(c.pkg);
+    }
+
+    /**
+     * Tarjetas, Spotify: what's playing now (big), Spotify's playlists (Top 50 Argentina…) and a way into the library,
+     * in one row; the focused one grows.
+     */
+    private void drawSpotifyRow(Canvas c, WatchNext.Content wc) {
+        SpotifyLists.load(watchImageReady);
+        NowPlaying np = nowPlaying;
+        boolean live = np != null && np.visible() && SpotifyLists.PKG.equals(np.pkg);
+        WatchNext.Entry first = wc.items.isEmpty() ? null : wc.items.get(0);
+        Bitmap art = live ? (np.artLarge != null ? np.artLarge : np.art) : first != null ? first.bitmap : null;
+        int ver = live ? np.version : -2 - wc.items.size();
+        float big = TS_H * k, small = 220 * k, gap = 40 * k;
+        if (ver != spotVersion || spotNames[0] == null) {   // the texts, cut to fit, once per song
+            spotVersion = ver;
+            String t = live ? np.title : first != null ? first.title : "";
+            String a = live ? np.artist : first != null ? first.sub : "";
+            spotTitle = TextUtils.ellipsize(t == null ? "" : t, watchTitle, big, TextUtils.TruncateAt.END).toString();
+            spotArtist = TextUtils.ellipsize(a == null ? "" : a, watchSub, big, TextUtils.TruncateAt.END).toString();
+            for (int i = 0; i < 4; i++) spotNames[i] = TextUtils.ellipsize(i < SpotifyLists.NAMES.length
+                    ? SpotifyLists.NAMES[i] : "", watchSub, small + 10 * k, TextUtils.TruncateAt.END).toString();
+        }
+        // The heading, with Spotify's dot.
+        float hx = TS_LEFT * k, hb = TS_HEAD * k;
+        fill.setShader(null);
+        fill.setColor(0xFF1ED760);
+        c.drawCircle(hx + 6 * k, hb - Ui.halfCap(watchHead), 6 * k, fill);
+        watchHead.setAlpha(255);
+        c.drawText(live ? "SONANDO AHORA" : "LO ÚLTIMO QUE SONÓ", hx + 24 * k, hb, watchHead);
+        float x = TS_LEFT * k, top = TS_TOP * k;
+        // Now playing.
+        spotTile(c, 0, x, top, big, art, 22 * k);
+        if (live && np.duration > 0) {   // how far it is, along the cover's foot
+            float in = 16 * k, bh = 6 * k, y = top + big - in, p = Ui.clamp(np.progress());
+            fill.setShader(null);
+            fill.setColor(0x8C000000);
+            tmp.set(x + in, y - bh, x + big - in, y);
+            c.drawRoundRect(tmp, bh / 2, bh / 2, fill);
+            fill.setColor(0xFF1ED760);
+            tmp.right = tmp.left + Math.max(bh, (big - 2 * in) * p);
+            c.drawRoundRect(tmp, bh / 2, bh / 2, fill);
+        }
+        watchTitle.setAlpha(255);
+        c.drawText(spotTitle, x, top + big + 44 * k, watchTitle);
+        watchSub.setAlpha(199);
+        c.drawText(spotArtist, x, top + big + 76 * k, watchSub);
+        // The playlists, with the heading over them.
+        x += big + 60 * k;
+        c.drawText("PLAYLISTS", x, hb, watchHead);
+        float sTop = top + big - small;   // their feet in line with the big one's
+        for (int i = 0; i < 4; i++) {
+            spotTile(c, 1 + i, x, sTop, small, SpotifyLists.covers[i], 16 * k);
+            watchSub.setAlpha(Ui.clamp(actFocus[1 + i].value) > 0.5f ? 255 : 199);
+            c.drawText(spotNames[i], x, top + big + 44 * k, watchSub);
+            x += small + gap;
+        }
+        // The library.
+        spotTile(c, 5, x, sTop, small, null, 16 * k);
+        float cx = x + small / 2, cy = sTop + small / 2 - 6 * k * Ui.clamp(actFocus[5].value);
+        Symbols.draw(getContext(), c, "library_music", cx, cy, 72 * k, 0xFFFFFFFF);
+        watchSub.setAlpha(Ui.clamp(actFocus[5].value) > 0.5f ? 255 : 199);
+        c.drawText("Tu biblioteca", x, top + big + 44 * k, watchSub);
+        watchSub.setAlpha(199);
+    }
+
+    /** One square of the Spotify row: it rises and grows with the focus, with a white ring. */
+    private void spotTile(Canvas c, int i, float x, float y, float s, Bitmap b, float rad) {
+        float f = Ui.clamp(actFocus[i].value), g = s * 0.08f * f;
+        cell.set(x - g / 2, y - g - 8 * k * f, x + s + g / 2, y + s - 8 * k * f);
+        tmp.set(cell);
+        tmp.offset(0, (10 + 10 * f) * k);
+        shadow.setColor(Ui.alpha(0xFF000000, 0.35f + 0.2f * f));
+        shadows.draw(c, tmp, rad, SHADOW_BLUR * 1.3f * k, shadow);
+        if (b != null) cropImage(c, b, cell, rad);
+        else {
+            fill.setShader(null);
+            fill.setColor(0x33FFFFFF);
+            c.drawRoundRect(cell, rad, rad, fill);
+            focusRing.setStrokeWidth(2 * k);
+            focusRing.setColor(0x59FFFFFF);
+            c.drawRoundRect(cell, rad, rad, focusRing);
+        }
+        if (f > 0.01f) {
+            focusRing.setStrokeWidth(4 * k);
+            focusRing.setColor(Ui.alpha(0xFFFFFFFF, 0.95f * f));
+            float o = 5 * k;
+            c.drawRoundRect(cell.left - o, cell.top - o, cell.right + o, cell.bottom + o, rad + o, rad + o, focusRing);
         }
     }
 
@@ -6447,7 +6563,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 if (watchShown()) {
                     zone = Z_WATCH;   // the bubble rises from the app, on its first card
                     watchIndex = 0;
-                    watchRow = 0;
+                    watchRow = spotRow() ? 1 : 0;
                     actIndex = 0;
                     layoutWatch();
                     placeWatch();
@@ -6480,6 +6596,17 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 // playlists in a 2×2 to its right.
                 int n = Math.min(3, watch.items.size()), ns = panelSmallCount();
                 boolean wide = !iconDock();
+                if (spotRow()) {   // Spotify on the cards: now playing, the playlists, the library, in one row
+                    if (dx != 0) {
+                        int nx = actIndex + dx;
+                        if (nx < 0 || nx >= SPOT_ITEMS) return true;
+                        actIndex = nx;
+                    } else if (dy < 0) {
+                        zone = Z_TOP;
+                        topIndex = 3;
+                    } else zone = Z_SHELF;
+                    break;
+                }
                 if (watchRow == 0 && wide) {   // the cards in a row
                     if (dx != 0) {
                         int nx = watchIndex + dx;
@@ -6659,6 +6786,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                     if (cards.isEmpty() && watchShown()) {
                         zone = Z_WATCH;
                         watchIndex = 0;
+                        watchRow = spotRow() ? 1 : 0;
+                        actIndex = 0;
                     } else if (cards.isEmpty() && recentShown()) {
                         zone = Z_RECENT;
                         recentIndex = nearest(recentRects, recent.size(), topRects[topIndex].centerX());
