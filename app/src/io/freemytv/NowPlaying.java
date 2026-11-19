@@ -41,6 +41,72 @@ final class NowPlaying implements MediaSessionManager.OnActiveSessionsChangedLis
     private Bitmap raw;   // the cover as the app sent it (art and artLarge are copies)
     private long songAt;
     private final Runnable reread = this::read;
+    private int[] startSig;
+    /** Pictures learnt to be the app's logo (sent in place of a cover between songs); kept in a file. */
+    private static final java.util.List<int[]> logos = new java.util.ArrayList<>();
+    private static boolean logosRead;
+
+    /** An 8×8 thumbnail's colours: enough to tell one picture from another. */
+    private static int[] signature(Bitmap b) {
+        try {
+            Bitmap src = b.getConfig() == Bitmap.Config.HARDWARE ? b.copy(Bitmap.Config.ARGB_8888, false) : b;
+            Bitmap t = Bitmap.createScaledBitmap(src, 8, 8, true);
+            int[] px = new int[64];
+            t.getPixels(px, 0, 8, 0, 0, 8, 8);
+            return px;
+        } catch (RuntimeException e) {
+            return new int[64];
+        }
+    }
+
+    private static boolean similar(int[] x, int[] y) {
+        long d = 0;
+        for (int i = 0; i < 64; i++) {
+            d += Math.abs(((x[i] >> 16) & 255) - ((y[i] >> 16) & 255)) + Math.abs(((x[i] >> 8) & 255) - ((y[i] >> 8) & 255))
+                    + Math.abs((x[i] & 255) - (y[i] & 255));
+        }
+        return d / 192 < 10;   // under 10 levels apart on average
+    }
+
+    private boolean isLogo(Bitmap b) {
+        readLogos();
+        if (logos.isEmpty()) return false;
+        int[] sg = signature(b);
+        for (int[] l : logos) if (similar(sg, l)) return true;
+        return false;
+    }
+
+    private void rememberLogo(int[] sg) {
+        readLogos();
+        for (int[] l : logos) if (similar(sg, l)) return;
+        logos.add(sg);
+        StringBuilder out = new StringBuilder();
+        for (int[] l : logos) {
+            for (int v : l) out.append(v).append(',');
+            out.append('\n');
+        }
+        try {
+            java.nio.file.Files.write(new java.io.File(context.getFilesDir(), "cover-logos.txt").toPath(), out.toString().getBytes("UTF-8"));
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void readLogos() {
+        if (logosRead) return;
+        logosRead = true;
+        try {
+            java.io.File f = new java.io.File(context.getFilesDir(), "cover-logos.txt");
+            if (!f.exists()) return;
+            for (String line : new String(java.nio.file.Files.readAllBytes(f.toPath()), "UTF-8").split("\n")) {
+                String[] parts = line.split(",");
+                if (parts.length < 64) continue;
+                int[] sg = new int[64];
+                for (int i = 0; i < 64; i++) sg[i] = Integer.parseInt(parts[i].trim());
+                logos.add(sg);
+            }
+        } catch (Exception ignored) {
+        }
+    }
     private MediaSessionManager msm;
     private MediaController controller;
 
@@ -264,6 +330,13 @@ final class NowPlaying implements MediaSessionManager.OnActiveSessionsChangedLis
                     MediaMetadata.METADATA_KEY_ALBUM_ARTIST, MediaMetadata.METADATA_KEY_ALBUM);
             b = m.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
             if (b == null) b = m.getBitmap(MediaMetadata.METADATA_KEY_ART);
+            if (b != null && (!t.equals(title) || !a.equals(artist))) {
+                // A new song: the same picture at the start of two different songs is the app's logo, not a cover.
+                int[] sg = signature(b);
+                if (startSig != null && similar(sg, startSig)) rememberLogo(sg);
+                startSig = sg;
+            }
+            if (b != null && art != null && isLogo(b)) b = null;   // the logo: as if no cover came yet
             if (b == null) {
                 // No cover yet: the app's logo (its display icon) is what Spotify sends first on a new song. The last
                 // cover stays a few seconds while the new one comes; only then the logo.
