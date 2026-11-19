@@ -121,6 +121,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private boolean wxOpen, wxWas;
     /** The drawer under the bar (D2): wide buttons; Entradas unfolds the inputs in place, the team its card. */
     private static final int TEAM_KIND = 30, WX_KIND = 31;
+    private static final float CLOCK_LIFT = 56;   // the clock block, up from the bar
     private final RectF weekCard = new RectF();
 
     private static boolean circle(HomeApps.Item it) {
@@ -2831,15 +2832,45 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private TextPaint teamName, teamHuge, teamLabel, teamPill;
     private final android.graphics.Path teamClip = new android.graphics.Path();
 
-    /** A crest made tiny, so drawn big it comes out soft (the card's blurred background). */
+    /** One box-blur pass over ARGB pixels (each channel, alpha too), along rows or columns. */
+    private static void boxBlurAlpha(int[] src, int[] dst, int w, int h, int r, boolean rows) {
+        int lines = rows ? h : w, len = rows ? w : h, win = 2 * r + 1;
+        for (int l = 0; l < lines; l++) {
+            int sa = 0, sr = 0, sg = 0, sb = 0;
+            for (int i = -r; i <= r; i++) {
+                int q = Math.max(0, Math.min(len - 1, i)), c = src[rows ? l * w + q : q * w + l];
+                sa += c >>> 24; sr += (c >> 16) & 255; sg += (c >> 8) & 255; sb += c & 255;
+            }
+            for (int i = 0; i < len; i++) {
+                dst[rows ? l * w + i : i * w + l] = (sa / win) << 24 | (sr / win) << 16 | (sg / win) << 8 | (sb / win);
+                int out = Math.max(0, i - r), add = Math.min(len - 1, i + r + 1);
+                int co = src[rows ? l * w + out : out * w + l], ca = src[rows ? l * w + add : add * w + l];
+                sa += (ca >>> 24) - (co >>> 24); sr += ((ca >> 16) & 255) - ((co >> 16) & 255);
+                sg += ((ca >> 8) & 255) - ((co >> 8) & 255); sb += (ca & 255) - (co & 255);
+            }
+        }
+    }
+
+    /** A crest blurred on a transparent square, drawn big as the card's soft background. */
     private Bitmap softCrest(int slot, Bitmap crest) {
         if (crest == null) return null;
         if (crestFor[slot] != crest) {
             crestFor[slot] = crest;
-            int sw = 18, sh = Math.max(1, Math.round(18f * crest.getHeight() / Math.max(1, crest.getWidth())));
             try {
                 Bitmap src = crest.getConfig() == Bitmap.Config.HARDWARE ? crest.copy(Bitmap.Config.ARGB_8888, false) : crest;
-                crestSoft[slot] = Bitmap.createScaledBitmap(src, sw, sh, true);
+                int n = 96, in = 60, ih = Math.max(1, Math.round(in * (float) src.getHeight() / Math.max(1, src.getWidth())));
+                Bitmap sq = Bitmap.createBitmap(n, n, Bitmap.Config.ARGB_8888);
+                Canvas cc = new Canvas(sq);
+                Paint pp = new Paint(Paint.FILTER_BITMAP_FLAG);
+                cc.drawBitmap(src, null, new RectF((n - in) / 2f, (n - ih) / 2f, (n + in) / 2f, (n + ih) / 2f), pp);
+                int[] px = new int[n * n], tmpPx = new int[n * n];
+                sq.getPixels(px, 0, n, 0, 0, n, n);
+                for (int pass = 0; pass < 3; pass++) {
+                    boxBlurAlpha(px, tmpPx, n, n, 5, true);
+                    boxBlurAlpha(tmpPx, px, n, n, 5, false);
+                }
+                sq.setPixels(px, 0, n, 0, 0, n, n);
+                crestSoft[slot] = sq;
             } catch (RuntimeException e) {
                 crestSoft[slot] = null;
             }
@@ -2883,7 +2914,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         fill.setColor(0xFF0D1726);
         c.drawRect(r, fill);
         // Behind: each crest huge and soft, on its side.
-        float big = r.height() * 1.5f;
+        float big = r.height() * 1.5f * 96 / 60;
         Bitmap[] soft = {softCrest(0, m.home.crest), softCrest(1, m.away.crest)};
         float[] at = {r.left + 210 * k, r.right - 210 * k};
         bitmapPaint.setFilterBitmap(true);
@@ -2927,7 +2958,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             if (tw > 460 * k) teamHuge.setTextSize(84 * k * 460 * k / tw);   // a long one ("Mañana 21:30") shrinks
             c.drawText(status, mx, r.top + 172 * k, teamHuge);
             teamHuge.setTextSize(84 * k);
-            c.drawText("vs", mx, r.top + 236 * k, teamLabel);
+            Futbol.Match last = teamMatch(true);   // and the last one, under it
+            if (last != null) {
+                String ln = "ÚLTIMO  " + last.home.abbr + " " + Futbol.score(last) + " " + last.away.abbr;
+                c.drawText(TextUtils.ellipsize(ln, teamLabel, 440 * k, TextUtils.TruncateAt.END).toString(), mx, r.top + 240 * k, teamLabel);
+            } else c.drawText("vs", mx, r.top + 236 * k, teamLabel);
         }
     }
 
@@ -4658,7 +4693,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             // Aligned with the bar of apps (Tarjetas): the block moves right to its first app's edge.
             float shift = iconDock() || platterRect.width() <= 0 ? 0 : Math.max(0, platterRect.left + SHELF_PAD * k - MARGIN * k);
             int moved = c.save();
-            c.translate(shift, 0);
+            c.translate(shift, -CLOCK_LIFT * k);
             if (zone == Z_WXBTN && !wxOpen) drawWxFocus(c);
             if (keep > 0.99f) {
                 drawClock(c);
@@ -4673,7 +4708,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             if (up > 0.01f) drawSmallClock(c, up);
             if (wxOpen) {
                 c.save();
-                c.translate(shift, 0);
+                c.translate(shift, -CLOCK_LIFT * k);
                 drawWxPanel(c);
                 c.restore();
             }
