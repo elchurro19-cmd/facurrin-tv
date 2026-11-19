@@ -38,6 +38,9 @@ final class NowPlaying implements MediaSessionManager.OnActiveSessionsChangedLis
     private final Context context;
     private final Listener listener;
     private final Handler main = new Handler(Looper.getMainLooper());
+    private Bitmap raw;   // the cover as the app sent it (art and artLarge are copies)
+    private long songAt;
+    private final Runnable reread = this::read;
     private MediaSessionManager msm;
     private MediaController controller;
 
@@ -261,7 +264,19 @@ final class NowPlaying implements MediaSessionManager.OnActiveSessionsChangedLis
                     MediaMetadata.METADATA_KEY_ALBUM_ARTIST, MediaMetadata.METADATA_KEY_ALBUM);
             b = m.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
             if (b == null) b = m.getBitmap(MediaMetadata.METADATA_KEY_ART);
-            if (b == null) b = m.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON);
+            if (b == null) {
+                // No cover yet: the app's logo (its display icon) is what Spotify sends first on a new song. The last
+                // cover stays a few seconds while the new one comes; only then the logo.
+                Bitmap icon = m.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON);
+                boolean newSong = !t.equals(title) || !a.equals(artist);
+                long now = SystemClock.elapsedRealtime();
+                if (newSong) songAt = now;
+                if (art != null && now - songAt < 4000) {
+                    b = raw;
+                    main.removeCallbacks(reread);
+                    main.postDelayed(reread, 4100 - (now - songAt));
+                } else b = icon;
+            }
             d = m.getLong(MediaMetadata.METADATA_KEY_DURATION);
         }
         boolean wasPlaying = playing;
@@ -283,9 +298,10 @@ final class NowPlaying implements MediaSessionManager.OnActiveSessionsChangedLis
         speed = s == null ? 0 : (s.getPlaybackSpeed() == 0 ? 1 : s.getPlaybackSpeed());
         duration = d;
         pkg = c == null ? "" : c.getPackageName();
-        if (!t.equals(title) || !a.equals(artist) || b != art) {
+        if (!t.equals(title) || !a.equals(artist) || b != raw) {   // (was compared to the copy: made again on every read)
             title = t;
             artist = a;
+            raw = b;
             art = b == null ? null : square(b, 160);
             // Glass edition: the open player shows the cover big, so it keeps a sharper copy too (up to 512 px).
             artLarge = b == null ? null : square(b, Math.min(512, Math.min(b.getWidth(), b.getHeight())));

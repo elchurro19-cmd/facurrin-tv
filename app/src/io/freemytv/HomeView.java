@@ -6312,6 +6312,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
      * buttons too, to the right edge. The cover and the song top left (where the capsule was), the bar and the
      * controls under the buttons. It stays above the clock's foot.
      */
+    private LinearGradient npRimShader;
+    private float npRimAt;
+
     private void drawNpCard(Canvas c) {
         float e = npOpen[0].value;
         NowPlaying np = nowPlaying;
@@ -6327,9 +6330,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         lShape(npShape, L, T, NX, NY, r, b, 32 * k);
         float ge = Ui.clamp(e * 3);
         // The shadow, under the body.
-        tmp.set(L + 14 * k, NY, r - 14 * k, b);
+        tmp.set(L + 14 * k, NY, R - 14 * k, B);   // its final size: one blurred shadow, made once (not one per frame)
         tmp.offset(0, 22 * k);
-        shadow.setColor(Ui.alpha(0xFF000000, 0.45f * ge));
+        shadow.setColor(Ui.alpha(0xFF000000, 0.45f * ge * ce));
         shadows.draw(c, tmp, 32 * k, SHADOW_BLUR * 1.8f * k, shadow);
         // The same glass as the capsule and the round buttons (clipped to the L), a light shade so the text reads, and
         // their rim lit from the top left along the L's edge.
@@ -6346,8 +6349,12 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             npRim.setStyle(Paint.Style.STROKE);
         }
         npRim.setStrokeWidth(Math.max(1.5f, 2.2f * k));
-        npRim.setShader(new LinearGradient(L, T, R, B, new int[] {0x99FFFFFF, 0x24FFFFFF, 0x47FFFFFF},
-                new float[] {0, 0.62f, 1}, Shader.TileMode.CLAMP));
+        if (npRimShader == null || npRimAt != L + T + R + B) {
+            npRimAt = L + T + R + B;
+            npRimShader = new LinearGradient(L, T, R, B, new int[] {0x99FFFFFF, 0x24FFFFFF, 0x47FFFFFF},
+                    new float[] {0, 0.62f, 1}, Shader.TileMode.CLAMP);
+        }
+        npRim.setShader(npRimShader);
         npRim.setAlpha(Math.round(255 * ge));
         c.drawPath(npShape, npRim);
         npRim.setShader(null);
