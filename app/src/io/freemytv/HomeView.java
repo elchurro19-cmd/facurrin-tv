@@ -4915,6 +4915,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         String q = (e.title + " " + e.sub).trim();
         if (q.isEmpty()) return false;
         Context ctx = getContext();
+        if (nowPlaying != null && nowPlaying.playFromSearch(e.pkg, q)) {   // Spotify's session plays it in place
+            click.open();
+            AppLog.w("song: playFromSearch " + q);
+            return true;
+        }
         android.content.Intent play = new android.content.Intent(android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
                 .setPackage(e.pkg)
                 .putExtra(android.app.SearchManager.QUERY, q)

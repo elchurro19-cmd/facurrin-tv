@@ -136,6 +136,18 @@ final class NowPlaying implements MediaSessionManager.OnActiveSessionsChangedLis
     }
 
     /** Play/pause: pause what plays, play what's paused. */
+    /** Asks the app playing now (when it's `pkg`) to find and play a song; false when there's no such session. */
+    boolean playFromSearch(String pkg, String query) {
+        MediaController c = controller;
+        if (c == null || !pkg.equals(c.getPackageName())) return false;
+        try {
+            c.getTransportControls().playFromSearch(query, new android.os.Bundle());
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     void toggle() {
         MediaController c = controller;
         if (c == null) return;
