@@ -3645,9 +3645,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             click.open();
             android.content.Intent in;
             if (actIndex == 0) in = getContext().getPackageManager().getLeanbackLaunchIntentForPackage(SpotifyLists.PKG);
-            else if (actIndex <= 4) in = SpotifyLists.open(actIndex - 1);
-            else in = new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("spotify:collection"))
-                    .setPackage(SpotifyLists.PKG);
+            else if (actIndex == 1) in = new android.content.Intent(android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse("spotify:collection")).setPackage(SpotifyLists.PKG);
+            else in = SpotifyLists.open(actIndex - 2);
             try {
                 if (in != null) getContext().startActivity(in.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
             } catch (RuntimeException e) {
@@ -5444,7 +5444,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
         // Centred over the bar of apps. The heading, with Spotify's dot.
         float x0 = (w - (big + 60 * k + 4 * (small + gap) + small)) / 2;
-        float hx = x0, hb = TS_HEAD * k;
+        float hx = x0, hb = (TS_TOP - 52) * k;   // above the cover even when it rises with the focus
         fill.setShader(null);
         fill.setColor(0xFF1ED760);
         c.drawCircle(hx + 6 * k, hb - Ui.halfCap(watchHead), 6 * k, fill);
@@ -5467,22 +5467,22 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         c.drawText(spotTitle, x, top + big + 44 * k, watchTitle);
         watchSub.setAlpha(199);
         c.drawText(spotArtist, x, top + big + 76 * k, watchSub);
-        // The playlists, with the heading over them.
+        // The library first, then the playlists (heading over them), all along the top of the big cover.
         x += big + 60 * k;
+        float sTop = top, under = top + small + 44 * k;
+        spotTile(c, 1, x, sTop, small, null, 16 * k);
+        float cx = x + small / 2, cy = sTop + small / 2 - 6 * k * Ui.clamp(actFocus[1].value);
+        Symbols.draw(getContext(), c, "library_music", cx, cy, 72 * k, 0xFFFFFFFF);
+        watchSub.setAlpha(Ui.clamp(actFocus[1].value) > 0.5f ? 255 : 199);
+        c.drawText("Tu biblioteca", x, under, watchSub);
+        x += small + gap;
         c.drawText("PLAYLISTS", x, hb, watchHead);
-        float sTop = top + big - small;   // their feet in line with the big one's
         for (int i = 0; i < 4; i++) {
-            spotTile(c, 1 + i, x, sTop, small, SpotifyLists.covers[i], 16 * k);
-            watchSub.setAlpha(Ui.clamp(actFocus[1 + i].value) > 0.5f ? 255 : 199);
-            c.drawText(spotNames[i], x, top + big + 44 * k, watchSub);
+            spotTile(c, 2 + i, x, sTop, small, SpotifyLists.covers[i], 16 * k);
+            watchSub.setAlpha(Ui.clamp(actFocus[2 + i].value) > 0.5f ? 255 : 199);
+            c.drawText(spotNames[i], x, under, watchSub);
             x += small + gap;
         }
-        // The library.
-        spotTile(c, 5, x, sTop, small, null, 16 * k);
-        float cx = x + small / 2, cy = sTop + small / 2 - 6 * k * Ui.clamp(actFocus[5].value);
-        Symbols.draw(getContext(), c, "library_music", cx, cy, 72 * k, 0xFFFFFFFF);
-        watchSub.setAlpha(Ui.clamp(actFocus[5].value) > 0.5f ? 255 : 199);
-        c.drawText("Tu biblioteca", x, top + big + 44 * k, watchSub);
         watchSub.setAlpha(199);
     }
 
