@@ -2811,7 +2811,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         if (drawerPanel == 1) c.drawText("Entradas  ·  Atrás vuelve", drawerRects[0].left + 4 * k, titleBase, rowTitle);
         if (drawerPanel != 1) {   // D2: the wide buttons, and the team's card under them when it's open
             for (int i = 0; i < drawerItems.size(); i++) drawDrawerButton(c, i);
-            if (drawerPanel == 2 && Prefs.futbol()) drawFutbolCard(c, futbolCard);
+            if (drawerPanel == 2 && Prefs.futbol()) drawTeamBig(c, futbolCard);
             if (drawerPanel == 3 && Prefs.weather()) {   // both at once: no pages to turn
                 drawerCard(c, weatherCard);
                 drawWeather(c, weatherCard);
@@ -2825,6 +2825,110 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         for (int i = 0; i < drawerItems.size(); i++) if (i != top) drawDrawerTile(c, i);
         if (top >= 0) drawDrawerTile(c, top);
         // (the inputs unfolded: no cards under them; the weather lives under the clock now)
+    }
+
+    private final Bitmap[] crestFor = new Bitmap[2], crestSoft = new Bitmap[2];
+    private TextPaint teamName, teamHuge, teamLabel, teamPill;
+    private final android.graphics.Path teamClip = new android.graphics.Path();
+
+    /** A crest made tiny, so drawn big it comes out soft (the card's blurred background). */
+    private Bitmap softCrest(int slot, Bitmap crest) {
+        if (crest == null) return null;
+        if (crestFor[slot] != crest) {
+            crestFor[slot] = crest;
+            int sw = 18, sh = Math.max(1, Math.round(18f * crest.getHeight() / Math.max(1, crest.getWidth())));
+            try {
+                Bitmap src = crest.getConfig() == Bitmap.Config.HARDWARE ? crest.copy(Bitmap.Config.ARGB_8888, false) : crest;
+                crestSoft[slot] = Bitmap.createScaledBitmap(src, sw, sh, true);
+            } catch (RuntimeException e) {
+                crestSoft[slot] = null;
+            }
+        }
+        return crestSoft[slot];
+    }
+
+    /**
+     * The team's card (T1 + T2): both crests big and blurred behind, each on its side; on them the crests sharp with
+     * the names, and in the middle the time (or, live, the score and the minute).
+     */
+    private void drawTeamBig(Canvas c, RectF r) {
+        Futbol.Match m = teamMatch(false);
+        if (m == null) m = teamMatch(true);
+        if (m == null) {
+            drawFutbolCard(c, r);
+            return;
+        }
+        if (teamName == null) {
+            teamName = new TextPaint(Ui.text(Ui.semibold, 28 * k, 0xFFFFFFFF));
+            teamName.setTextAlign(Paint.Align.CENTER);
+            teamHuge = new TextPaint(Ui.text(Ui.displaySemibold, 84 * k, 0xFFFFFFFF));
+            teamHuge.setTextAlign(Paint.Align.CENTER);
+            teamLabel = new TextPaint(Ui.text(Ui.semibold, 20 * k, 0xCCFFFFFF));
+            teamLabel.setTextAlign(Paint.Align.CENTER);
+            teamLabel.setLetterSpacing(0.2f);
+            teamPill = new TextPaint(Ui.text(Ui.semibold, 24 * k, 0xFFFFFFFF));
+            teamPill.setTextAlign(Paint.Align.CENTER);
+            for (Paint sp : new Paint[] {teamName, teamHuge, teamLabel}) sp.setShadowLayer(12 * k, 0, 2 * k, 0x99000000);
+        }
+        float rad = 30 * k;
+        tmp.set(r);
+        tmp.offset(0, 14 * k);
+        shadow.setColor(0x59000000);
+        shadows.draw(c, tmp, rad, SHADOW_BLUR * 1.4f * k, shadow);
+        c.save();
+        teamClip.reset();
+        teamClip.addRoundRect(r, rad, rad, android.graphics.Path.Direction.CW);
+        c.clipPath(teamClip);
+        fill.setShader(null);
+        fill.setColor(0xFF0D1726);
+        c.drawRect(r, fill);
+        // Behind: each crest huge and soft, on its side.
+        float big = r.height() * 1.5f;
+        Bitmap[] soft = {softCrest(0, m.home.crest), softCrest(1, m.away.crest)};
+        float[] at = {r.left + 210 * k, r.right - 210 * k};
+        bitmapPaint.setFilterBitmap(true);
+        for (int j = 0; j < 2; j++) {
+            if (soft[j] == null) continue;
+            float bh = big * soft[j].getHeight() / Math.max(1f, soft[j].getWidth());
+            cell.set(at[j] - big / 2, r.centerY() - bh / 2, at[j] + big / 2, r.centerY() + bh / 2);
+            bitmapPaint.setAlpha(150);
+            c.drawBitmap(soft[j], null, cell, bitmapPaint);
+        }
+        bitmapPaint.setAlpha(255);
+        fill.setColor(0x66000000);
+        c.drawRect(r, fill);
+        c.restore();
+        focusRing.setStrokeWidth(2 * k);
+        focusRing.setColor(0x66FFFFFF);
+        c.drawRoundRect(r, rad, rad, focusRing);
+        // On them: the crests sharp, the names under them.
+        float cy = r.top + 140 * k, cs = 120 * k;
+        drawCrest(c, m.home.crest, at[0] - cs / 2, cy, cs, 1);
+        drawCrest(c, m.away.crest, at[1] - cs / 2, cy, cs, 1);
+        c.drawText(m.home.shortName, at[0], r.top + 250 * k, teamName);
+        c.drawText(m.away.shortName, at[1], r.top + 250 * k, teamName);
+        // The middle: the round on top; the time, or the score (live: the minute in a red pill).
+        float mx = r.centerX();
+        String round = m.round == null || m.round.isEmpty() ? m.league : m.round;
+        c.drawText(TextUtils.ellipsize(round.toUpperCase(Ui.locale()), teamLabel, 440 * k, TextUtils.TruncateAt.END).toString(),
+                mx, r.top + 58 * k, teamLabel);
+        long now = System.currentTimeMillis();
+        String status = Futbol.status(m, now);
+        if (m.live() || m.done()) {
+            c.drawText(Futbol.score(m), mx, r.top + 172 * k, teamHuge);
+            float pw = Math.max(110 * k, teamPill.measureText(status) + 40 * k), py = r.top + 200 * k;
+            fill.setColor(m.live() ? LIVE_RED : 0x59FFFFFF);
+            tmp.set(mx - pw / 2, py, mx + pw / 2, py + 44 * k);
+            c.drawRoundRect(tmp, 22 * k, 22 * k, fill);
+            c.drawText(status, mx, tmp.centerY() + Ui.halfCap(teamPill), teamPill);
+        } else {
+            teamHuge.setTextSize(84 * k);
+            float tw = teamHuge.measureText(status);
+            if (tw > 460 * k) teamHuge.setTextSize(84 * k * 460 * k / tw);   // a long one ("Mañana 21:30") shrinks
+            c.drawText(status, mx, r.top + 172 * k, teamHuge);
+            teamHuge.setTextSize(84 * k);
+            c.drawText("vs", mx, r.top + 236 * k, teamLabel);
+        }
     }
 
     /** D2: a wide drawer button: its symbol (the team's crest) on the left, the name and a line under it. */
@@ -3663,9 +3767,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                     drawerIndex = next;
                 } else if (dy < 0) {
                     closeDrawer();
-                } else if (drawerPanel == 2 && Prefs.futbol() && !talkBack()) {
-                    zone = Z_FUTBOL;   // down onto the team's card
-                    cardEngaged = false;
+                } else if (false) {   // the team's card has nothing to move to
                 } else if (talkBack() && !widgets().isEmpty()) {
                     // Only with TalkBack: the widgets are there to be read, and this is how it gets to them.
                     zone = WIDGETS;
