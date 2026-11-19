@@ -5307,8 +5307,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private void drawWatch(Canvas c) {
         WatchNext.Content wc = watch;
         if (wc == null) return;
-        drawBubble(c, wc);   // both styles: the bubble C (Tarjetas: wide, K1)
-        if (wc != null) return;
+        if (iconDock()) {   // Íconos: the bubble C. Tarjetas: the cards in a row, the focused one wide (as before)
+            drawBubble(c, wc);
+            return;
+        }
+        drawCardPlaylists(c);
         placeWatchCards();
         // The heading, with a dot of the app's colour.
         float hx = watchHeadX, hb = iconDock() ? (PANEL_TOP - 30) * k : TS_HEAD * k;
@@ -5390,6 +5393,55 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             }
         }
     }
+
+    /** Tarjetas, Spotify: its playlists in a 2×2 to the right of the cards. */
+    private void drawCardPlaylists(Canvas c) {
+        int ns = panelSmallCount();
+        if (ns <= 0) return;
+        SpotifyLists.load(watchImageReady);
+        if (bubTitle == null) {
+            bubTitle = new TextPaint(Ui.text(Ui.semibold, 26 * k, 0xFFFFFFFF));
+            bubSub = new TextPaint(Ui.text(Ui.regular, 21 * k, 0xB3FFFFFF));
+            bubHead = new TextPaint(Ui.text(Ui.semibold, 22 * k, 0xD9FFFFFF));
+            bubHead.setLetterSpacing(0.18f);
+            bubBig = new TextPaint(Ui.text(Ui.displaySemibold, 34 * k, 0xFFFFFFFF));
+            bubBig.setShadowLayer(10 * k, 0, 2 * k, 0x99000000);
+            bubBigSub = new TextPaint(Ui.text(Ui.regular, 23 * k, 0xD9FFFFFF));
+            bubBigSub.setShadowLayer(8 * k, 0, 2 * k, 0x99000000);
+            for (Paint sp : new Paint[] {bubTitle, bubSub, bubHead}) sp.setShadowLayer(10 * k, 0, 2 * k, 0x80000000);
+        }
+        if (cardLists[0] == null) {
+            for (int i = 0; i < 4; i++) cardLists[i] = i < SpotifyLists.NAMES.length
+                    ? TextUtils.ellipsize(SpotifyLists.NAMES[i], bubSub, 220 * k, TextUtils.TruncateAt.END).toString() : "";
+        }
+        float item = 140 * k, stepX = 240 * k, stepY = 196 * k, px = w - (TS_LEFT + 380) * k, py = TS_TOP * k;
+        c.drawText("PLAYLISTS POPULARES", px, TS_HEAD * k, watchHead);
+        for (int i = 0; i < ns; i++) {
+            float f = watchRow == 1 ? Ui.clamp(actFocus[i].value) : 0;
+            float ix = px + (i % 2) * stepX, iy = py + (i / 2) * stepY;
+            cell.set(ix, iy, ix + item, iy + item);
+            cell.offset(0, -6 * k * f);
+            tmp.set(cell);
+            tmp.offset(0, 10 * k);
+            shadow.setColor(0x59000000);
+            shadows.draw(c, tmp, 16 * k, SHADOW_BLUR * k, shadow);
+            Bitmap b = SpotifyLists.covers[i];
+            if (b != null) roundImage(c, b, cell, 16 * k);
+            else {
+                fill.setShader(null);
+                fill.setColor(0x24FFFFFF);
+                c.drawRoundRect(cell, 16 * k, 16 * k, fill);
+            }
+            if (f > 0.01f) {
+                focusRing.setStrokeWidth(4 * k);
+                focusRing.setColor(Ui.alpha(0xFFFFFFFF, 0.95f * f));
+                c.drawRoundRect(cell.left - 5 * k, cell.top - 5 * k, cell.right + 5 * k, cell.bottom + 5 * k, 21 * k, 21 * k, focusRing);
+            }
+            c.drawText(cardLists[i], ix, iy + item + 30 * k, f > 0.5f ? bubTitle : bubSub);
+        }
+    }
+
+    private final String[] cardLists = new String[4];
 
     private void drawWatchImage(Canvas c, WatchNext.Entry e, RectF r, float rad, float a) {
         if (e.bitmap != null) {
@@ -6428,7 +6480,19 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 // playlists in a 2×2 to its right.
                 int n = Math.min(3, watch.items.size()), ns = panelSmallCount();
                 boolean wide = !iconDock();
-                if (watchRow == 0) {
+                if (watchRow == 0 && wide) {   // the cards in a row
+                    if (dx != 0) {
+                        int nx = watchIndex + dx;
+                        if (nx >= 0 && nx < n) watchIndex = nx;
+                        else if (dx > 0 && ns > 0) {
+                            watchRow = 1;
+                            actIndex = 0;
+                        } else return true;
+                    } else if (dy < 0) {
+                        zone = Z_TOP;
+                        topIndex = 3;
+                    } else zone = Z_SHELF;
+                } else if (watchRow == 0) {
                     if (dy != 0) {
                         int nx = watchIndex + dy;
                         if (nx >= 0 && nx < n) watchIndex = nx;
@@ -6447,9 +6511,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                     int col = actIndex % 2, row = actIndex / 2;
                     if (dx != 0) {
                         int nc = col + dx;
-                        if (nc < 0) {   // ← from the left column: back to the list
+                        if (nc < 0) {   // ← from the left column: back to the last card
                             watchRow = 0;
-                            watchIndex = Math.min(n - 1, row == 0 ? 0 : 2);
+                            watchIndex = n - 1;
                         } else if (nc > 1 || row * 2 + nc >= ns) return true;
                         else actIndex = row * 2 + nc;
                     } else {
