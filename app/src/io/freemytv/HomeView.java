@@ -120,7 +120,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private static final int Z_WXBTN = 16;
     private boolean wxOpen, wxWas;
     /** The drawer under the bar (D2): wide buttons; Entradas unfolds the inputs in place, the team its card. */
-    private static final int TEAM_KIND = 30;
+    private static final int TEAM_KIND = 30, WX_KIND = 31;
+
+    private static boolean circle(HomeApps.Item it) {
+        return it.kind == TEAM_KIND || it.kind == WX_KIND;
+    }
     private int drawerPanel;   // 0 the buttons, 1 the inputs, 2 the team's card
     private List<HomeApps.Item> drawerButtons = new ArrayList<>(), inputsList = new ArrayList<>();
     private TextPaint btnTitle, btnSub, wxHint;
@@ -2657,8 +2661,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             else list.add(it);
         }
         if (!HomeApps.allInputs(c).isEmpty()) list.add(HomeApps.action(HomeApps.INPUTS, "inputs", "Entradas", "hdmi"));
-        if (Prefs.futbol()) list.add(HomeApps.action(TEAM_KIND, "team", "Mi equipo", "tv"));
         if (browser != null) list.add(browser);
+        // Two circles at the end: the team (its crest only) and the weather (OK opens its panel).
+        if (Prefs.futbol()) list.add(HomeApps.action(TEAM_KIND, "team", "Mi equipo", "tv"));
+        if (Prefs.weather()) list.add(HomeApps.action(WX_KIND, "weather", "Clima", "partly_cloudy_day"));
         return list;
     }
 
@@ -2707,12 +2713,15 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     private void layoutDrawer() {
         if (drawerPanel != 1) {   // D2: wide buttons in a row, centred
-            int n = drawerItems.size();
-            float gap = 24 * k, bw = Math.min(400 * k, (CONTENT_R * k - MARGIN * k - Math.max(0, n - 1) * gap) / Math.max(1, n));
-            float x = (w - (n * bw + Math.max(0, n - 1) * gap)) / 2, top = (ROW_TOP + 8) * k;
+            int n = drawerItems.size(), circles = 0;
+            for (HomeApps.Item it : drawerItems) if (circle(it)) circles++;
+            float gap = 24 * k, d = 110 * k, pills = Math.max(1, n - circles);
+            float bw = Math.min(400 * k, (CONTENT_R * k - MARGIN * k - circles * d - Math.max(0, n - 1) * gap) / pills);
+            float x = (w - ((n - circles) * bw + circles * d + Math.max(0, n - 1) * gap)) / 2, top = (ROW_TOP + 8) * k;
             for (int i = 0; i < n; i++) {
-                drawerRects[i].set(x, top, x + bw, top + 110 * k);
-                x += bw + gap;
+                float iw = circle(drawerItems.get(i)) ? d : bw;
+                drawerRects[i].set(x, top, x + iw, top + d);
+                x += iw + gap;
             }
             futbolCard.set((w - 1040 * k) / 2, CARDS_TOP * k, (w + 1040 * k) / 2, (CARDS_TOP + CARDS_H) * k);
             weatherCard.set(0, 0, 0, 0);
@@ -2832,6 +2841,16 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         if (btnTitle == null) {
             btnTitle = new TextPaint(Ui.text(Ui.semibold, 27 * k, 0xFFFFFFFF));
             btnSub = new TextPaint(Ui.text(Ui.regular, 20 * k, 0xB3FFFFFF));
+        }
+        if (circle(it)) {
+            if (it.kind == TEAM_KIND) {
+                Futbol.Match m = teamMatch(false);
+                if (m == null) m = teamMatch(true);
+                Bitmap crest = m == null ? null : m.home.id.equals(Futbol.CLUB) ? m.home.crest : m.away.crest;
+                if (crest != null) drawCrest(c, crest, cx - 32 * k * s, cy, 64 * k * s, 1);
+                else Symbols.draw(getContext(), c, "tv", cx, cy, 40 * k * s, ink);
+            } else Symbols.draw(getContext(), c, it.symbol, cx, cy, 46 * k * s, ink);
+            return;
         }
         String title = it.label, sub = "";
         float ix = cell.left + 58 * k * s, tx = cell.left + 110 * k * s, room = cell.right - 24 * k - tx;
@@ -3736,6 +3755,14 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 retarget(false);
                 return;
             }
+            if (it.kind == WX_KIND) {
+                click.open();
+                closeDrawer();
+                zone = Z_WXBTN;
+                wxOpen = true;
+                retarget(false);
+                return;
+            }
             if (it.kind == TEAM_KIND) {   // the team's card opens (or closes) under the buttons
                 click.open();
                 drawerPanel = drawerPanel == 2 ? 0 : 2;
@@ -3793,8 +3820,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             click.open();
             android.content.Intent in;
             if (actIndex == 0) in = getContext().getPackageManager().getLeanbackLaunchIntentForPackage(SpotifyLists.PKG);
-            else if (actIndex == 1) in = getContext().getPackageManager().getLeanbackLaunchIntentForPackage(SpotifyLists.PKG);
-            // (spotify:collection plays Liked Songs on the TV app instead of showing the library)
+            else if (actIndex == 1) in = new android.content.Intent(android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse("spotify:collection:playlists")).setPackage(SpotifyLists.PKG);
+            // (plain spotify:collection plays Liked Songs on the TV app instead of showing the library)
             else in = SpotifyLists.open(actIndex - 2);
             try {
                 if (in != null) getContext().startActivity(in.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
@@ -4516,6 +4544,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             // With an app's shelf up, the big clock, the weather and the games fade out and a small clock takes the
             // top left (option E).
             float up = Math.max(Ui.clamp(bubbleShow[0].value), wxOpen ? 1 : 0), keep = 1 - up;
+            // Aligned with the bar of apps (Tarjetas): the block moves right to its first app's edge.
+            float shift = iconDock() || platterRect.width() <= 0 ? 0 : Math.max(0, platterRect.left + SHELF_PAD * k - MARGIN * k);
+            int moved = c.save();
+            c.translate(shift, 0);
             if (zone == Z_WXBTN && !wxOpen) drawWxFocus(c);
             if (keep > 0.99f) {
                 drawClock(c);
@@ -4526,8 +4558,14 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 if (Prefs.futbol()) drawFutbolRow(c);
                 c.restoreToCount(saved);
             }
+            c.restoreToCount(moved);
             if (up > 0.01f) drawSmallClock(c, up);
-            if (wxOpen) drawWxPanel(c);
+            if (wxOpen) {
+                c.save();
+                c.translate(shift, 0);
+                drawWxPanel(c);
+                c.restore();
+            }
             drawShelfHint(c);
             drawNpCard(c);
             drawSleepPanel(c);
@@ -5655,28 +5693,22 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         float sTop = top, under = top + small + 44 * k;
         spotTile(c, 1, x, sTop, small, null, 16 * k);
         float cx = x + small / 2, cy = sTop + small / 2 - 6 * k * Ui.clamp(actFocus[1].value);
-        // Spotify's mark, drawn: a green disc with three dark arcs.
-        float rr = small * 0.26f;
+        // The library's mark, like Spotify's: three books standing and one leaning.
+        float u = small * 0.05f, bh = small * 0.36f, by = cy + bh / 2;
         fill.setShader(null);
-        fill.setColor(0xFF1ED760);
-        c.drawCircle(cx, cy, rr, fill);
-        if (spotArc == null) {
-            spotArc = new Paint(Paint.ANTI_ALIAS_FLAG);
-            spotArc.setStyle(Paint.Style.STROKE);
-            spotArc.setStrokeCap(Paint.Cap.ROUND);
-            spotArc.setColor(0xFF121212);
-            spotPath = new android.graphics.Path();
-        }
+        fill.setColor(0xFFFFFFFF);
         for (int j = 0; j < 3; j++) {
-            float hw = rr * (0.62f - 0.1f * j), y0 = cy - rr * 0.28f + j * rr * 0.3f;
-            spotArc.setStrokeWidth(rr * (0.15f - 0.025f * j));
-            spotPath.reset();
-            spotPath.moveTo(cx - hw, y0);
-            spotPath.quadTo(cx, y0 - rr * 0.22f, cx + hw, y0 + rr * 0.08f);
-            c.drawPath(spotPath, spotArc);
+            float bx = cx - 4.2f * u + j * 2.1f * u;
+            tmp.set(bx, by - bh, bx + 1.1f * u, by);
+            c.drawRoundRect(tmp, u * 0.3f, u * 0.3f, fill);
         }
+        c.save();
+        c.rotate(-20, cx + 2.6f * u, by);
+        tmp.set(cx + 2.6f * u, by - bh, cx + 3.7f * u, by);
+        c.drawRoundRect(tmp, u * 0.3f, u * 0.3f, fill);
+        c.restore();
         watchSub.setAlpha(Ui.clamp(actFocus[1].value) > 0.5f ? 255 : 199);
-        c.drawText("Abrir Spotify", x, under, watchSub);
+        c.drawText("Tu biblioteca", x, under, watchSub);
         x += small + gap;
         c.drawText("PLAYLISTS", x, hb, watchHead);
         for (int i = 0; i < 4; i++) {
