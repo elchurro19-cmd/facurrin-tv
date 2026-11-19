@@ -5287,7 +5287,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             if (i == 0) f = Math.max(f, 1 - any);
             total += small + (big - small) * f + (i > 0 ? TS_GAP * k : 0);
         }
-        float x = iconDock() ? (w - Math.max(total, PANEL_MIN_W * k)) / 2 : TS_LEFT * k;
+        float x = iconDock() ? (w - Math.max(total, PANEL_MIN_W * k)) / 2 : (w - total) / 2;   // centred, like the bar
         float top = (iconDock() ? PANEL_TOP : TS_TOP) * k;
         float x0 = x;
         for (int i = 0; i < n; i++) {
@@ -5442,14 +5442,15 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             for (int i = 0; i < 4; i++) spotNames[i] = TextUtils.ellipsize(i < SpotifyLists.NAMES.length
                     ? SpotifyLists.NAMES[i] : "", watchSub, small + 10 * k, TextUtils.TruncateAt.END).toString();
         }
-        // The heading, with Spotify's dot.
-        float hx = TS_LEFT * k, hb = TS_HEAD * k;
+        // Centred over the bar of apps. The heading, with Spotify's dot.
+        float x0 = (w - (big + 60 * k + 4 * (small + gap) + small)) / 2;
+        float hx = x0, hb = TS_HEAD * k;
         fill.setShader(null);
         fill.setColor(0xFF1ED760);
         c.drawCircle(hx + 6 * k, hb - Ui.halfCap(watchHead), 6 * k, fill);
         watchHead.setAlpha(255);
         c.drawText(live ? "SONANDO AHORA" : "LO ÚLTIMO QUE SONÓ", hx + 24 * k, hb, watchHead);
-        float x = TS_LEFT * k, top = TS_TOP * k;
+        float x = x0, top = TS_TOP * k;
         // Now playing.
         spotTile(c, 0, x, top, big, art, 22 * k);
         if (live && np.duration > 0) {   // how far it is, along the cover's foot
