@@ -94,6 +94,7 @@ final class Prefs {
     /** The home screen's background: "black" or one of Gallery.KINDS (a file: the screensaver reads it too). */
     static String homeBackground(Context c) {
         String v = readString(c, "home-background.txt", "black");
+        if (v.equals("scene")) return Gallery.BING;   // the moving scene was swapped for Bing's photos
         return v.equals("modern") ? Gallery.ART : v;   // modern art was an option for a while
     }
 

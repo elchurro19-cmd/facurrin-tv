@@ -559,9 +559,9 @@ public class SettingsActivity extends Activity {
         private static final String[] UNITS = {"auto", "C", "F"}, THEMES = {"auto", "light", "dark"};
         /** Home Settings: language, temperature, theme, sounds, weather, city, football, favourite club and team. */
         private static final int CITY_ROW = 5, FUTBOL_ROW = 6, CLUB_ROW = 7, NATION_ROW = 8, WATCH_ROW = 9, STYLE_ROW = 10;
-        private static final String[] HOME_PICTURES = {"black", HomeView.SCENE, Gallery.LANDSCAPES, Gallery.ART, Gallery.ABSTRACT,
+        private static final String[] HOME_PICTURES = {"black", Gallery.BING, Gallery.LANDSCAPES, Gallery.ART, Gallery.ABSTRACT,
                 Gallery.ANIMALS, Gallery.FAVORITES};
-        private static final String[] SCREENSAVERS = {Gallery.LANDSCAPES, Gallery.ART, Gallery.ABSTRACT, Gallery.ANIMALS,
+        private static final String[] SCREENSAVERS = {Gallery.BING, Gallery.LANDSCAPES, Gallery.ART, Gallery.ABSTRACT, Gallery.ANIMALS,
                 Gallery.FAVORITES, "clock"};
         /** Backgrounds: how often the home one changes (minutes) and how long each screensaver photo stays (seconds). */
         private static final int[] HOME_MINUTES = {60, 360, 720, 1440, 10080};

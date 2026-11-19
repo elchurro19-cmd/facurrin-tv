@@ -29,9 +29,12 @@ final class Gallery {
     private Gallery() {}
 
     static final String LANDSCAPES = "landscapes", ART = "art", ANIMALS = "animals", ABSTRACT = "abstract", FAVORITES = "favorites";
+    /** Glass edition: Bing's photos of the day (an archive kept on GitHub by npanuhin: no key), the last few years. */
+    static final String BING = "bing";
+    private static final String BING_ARCHIVE = "https://bing.npanuhin.me/US/en.";
 
     /** Every kind of photos, in the order they're offered. */
-    static final String[] KINDS = {LANDSCAPES, ART, ABSTRACT, ANIMALS, FAVORITES};
+    static final String[] KINDS = {BING, LANDSCAPES, ART, ABSTRACT, ANIMALS, FAVORITES};
 
     /**
      * Seasonal themes (Home Settings > Backgrounds > Seasonal theme): while one is on, the home screen's background and
@@ -51,6 +54,7 @@ final class Gallery {
     /** Its name in the settings and menus. */
     static String name(String kind) {
         switch (kind) {
+            case BING: return "Fotos de Bing";
             case ART: return "Arte";
             case ABSTRACT: return "Arte abstracto";
             case ANIMALS: return "Animales";
@@ -127,6 +131,7 @@ final class Gallery {
         try {
             String[] theme = themeSearches(kind);
             List<Item> fresh = theme != null ? search(theme, 1.3f, 4)
+                    : kind.equals(BING) ? bing()
                     : kind.equals(ANIMALS) ? search(ANIMAL_SEARCHES, 1.3f, 4)
                     : kind.equals(ABSTRACT) ? search(ABSTRACT_SEARCHES, 1.15f, 10)   // a painting crops well enough
                     : fetch(kind.equals(ART) ? ART_CATEGORIES : LANDSCAPE_CATEGORIES, 1.3f);
@@ -217,6 +222,37 @@ final class Gallery {
     }
 
     /** The image on disk, downloaded first if needed (background thread). */
+    /**
+     * Bing's photos of the day from this year and the two before (about a thousand), at 1920×1080: the place as the
+     * title, the photographer as the author.
+     */
+    private static List<Item> bing() throws Exception {
+        List<Item> out = new ArrayList<>();
+        int year = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR);
+        for (int y = year; y > year - 3; y--) {
+            String json;
+            try {
+                json = get(BING_ARCHIVE + y + ".json");
+            } catch (IOException e) {
+                continue;   // this year's file may not be there yet
+            }
+            org.json.JSONArray a = new org.json.JSONArray(json);
+            for (int i = 0; i < a.length(); i++) {
+                org.json.JSONObject o = a.optJSONObject(i);
+                if (o == null) continue;
+                String bingUrl = o.optString("bing_url", ""), mirror = o.optString("url", "");
+                Item it = new Item();
+                it.url = bingUrl.contains("_UHD.jpg") ? bingUrl.replace("_UHD.jpg", "_1920x1080.jpg") : mirror;
+                if (it.url.isEmpty()) continue;
+                it.title = o.optString("title", "");
+                it.author = o.optString("copyright", "").replace("©", "").trim();
+                it.width = 1920;
+                out.add(it);
+            }
+        }
+        return out;
+    }
+
     static File image(Context c, Item it) throws IOException {
         if (it.url.startsWith(OWN)) return new File(it.url.substring(OWN.length()));   // already a shrunk copy
         File dir = new File(c.getCacheDir(), "gallery");

@@ -1049,7 +1049,9 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
             mPath.moveTo(tx, by);
             for (float x = tx; ; x += 5 * k) {
                 float xx = Math.min(x, head), u = (xx - tx) / span, hill = (float) Math.sin(Math.PI * u);
-                float roll = np.playing ? 0.6f + 0.4f * (float) Math.sin(u * 7 - t * 2.2f) : 1;
+                // Rolling only while the controls show: hidden, the hill keeps its shape (the screen redraws once a second).
+                boolean rolling = np.playing && SystemClock.uptimeMillis() - darkKeyAt < CTRL_SHOW_MS + CTRL_FADE_MS;
+                float roll = rolling ? 0.6f + 0.4f * (float) Math.sin(u * 7 - t * 2.2f) : 1;
                 mPath.lineTo(xx, by - bh / 2 - amp * hill * hill * roll);
                 if (xx >= head) break;
             }
@@ -1110,7 +1112,9 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
             postInvalidateDelayed(ctrlFading ? 40 : since < CTRL_SHOW_MS ? CTRL_SHOW_MS - since : 1000);
             return;
         }
-        postInvalidateDelayed(np.playing || ctrlFading ? 50 : 500);   // the hill rolls; paused, the times still tick
+        // The hill rolls only while the controls show; then once a second (the bar and the times still move).
+        boolean shownNow = since < CTRL_SHOW_MS + CTRL_FADE_MS;
+        postInvalidateDelayed(ctrlFading || (np.playing && shownNow) ? 50 : 1000);
     }
 
     private static String time(float ms) {
