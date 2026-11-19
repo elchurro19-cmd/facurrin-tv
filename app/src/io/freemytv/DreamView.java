@@ -858,26 +858,13 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
 
     /**
      * The song's keys. Light (M1): ← → between the controls and the moon, OK presses the focused one (the moon turns
-     * it dark). Dark (M3): OK plays or pauses, ← → change the song, ↑ or ↓ bring the light back. Back ends it as before.
+     * it dark). Dark: the same keys, and the moon brings the light back. Back ends it as before.
      */
     private boolean musicKey(android.view.KeyEvent e) {
         int code = e.getKeyCode();
         NowPlaying np = nowPlaying;
         boolean ok = code == android.view.KeyEvent.KEYCODE_DPAD_CENTER || code == android.view.KeyEvent.KEYCODE_ENTER
                 || code == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER;
-        if (darkNow) {
-            darkKeyAt = SystemClock.uptimeMillis();   // the controls show for a moment
-            if (ok) np.toggle();
-            else if (code == android.view.KeyEvent.KEYCODE_DPAD_LEFT) np.previous();
-            else if (code == android.view.KeyEvent.KEYCODE_DPAD_RIGHT) np.next();
-            else if (code == android.view.KeyEvent.KEYCODE_DPAD_UP || code == android.view.KeyEvent.KEYCODE_DPAD_DOWN) {
-                darkNow = false;
-                setDark(getContext(), false);
-                musicFocus = MC_MOON;
-            } else return false;
-            invalidate();
-            return true;
-        }
         switch (code) {
             case android.view.KeyEvent.KEYCODE_DPAD_LEFT:
             case android.view.KeyEvent.KEYCODE_DPAD_RIGHT: {
@@ -898,11 +885,9 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
                     case MC_PREV: np.previous(); break;
                     case MC_NEXT: np.next(); break;
                     case MC_REPEAT: np.repeat(); break;
-                    case MC_MOON:
-                        darkNow = true;
-                        darkKeyAt = SystemClock.uptimeMillis();
-                        setDark(getContext(), true);
-                        musicFocus = MC_PLAY;
+                    case MC_MOON:   // the moon switches between light and dark
+                        darkNow = !darkNow;
+                        setDark(getContext(), darkNow);
                         break;
                     default: np.toggle();
                 }
@@ -1089,7 +1074,7 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
             if (!musicHas(np, i)) continue;
             float cx = i == MC_SHUFFLE ? mid - pw / 2 - 70 * k : i == MC_PREV ? mid - step : i == MC_NEXT ? mid + step
                     : i == MC_REPEAT ? mid + pw / 2 + 70 * k : i == MC_MOON ? tr - 40 * k : mid;
-            boolean f = i == musicFocus && !dk;
+            boolean f = i == musicFocus;
             float r = (i == MC_PLAY ? 36 : 32) * k;
             if (i == MC_MOON && !f) {   // the moon sits on its own glass circle
                 mFill.setColor(Ui.alpha(dk ? 0xFF141414 : 0x26FFFFFF, ca));
@@ -1097,12 +1082,12 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
                 mRing.setColor(Ui.alpha(dk ? 0x1AFFFFFF : 0x66FFFFFF, ca));
                 c.drawCircle(cx, cy, r, mRing);
             }
-            if (f) {
-                mFill.setColor(Ui.alpha(0xFFFFFFFF, ca));
+            if (f) {   // dark: a dim circle, so it doesn't light the room
+                mFill.setColor(Ui.alpha(dk ? 0x40FFFFFF : 0xFFFFFFFF, ca));
                 c.drawCircle(cx, cy, r, mFill);
             }
             boolean active = (i == MC_SHUFFLE && np.shuffleOn) || (i == MC_REPEAT && np.repeatMode != 0);
-            int ink = dk ? 0x73FFFFFF : f ? 0xFF141414 : active ? musicAccent : 0xF2FFFFFF;
+            int ink = dk ? (f ? 0xD9FFFFFF : 0x73FFFFFF) : f ? 0xFF141414 : active ? musicAccent : 0xF2FFFFFF;
             if (i == MC_MOON) {
                 Symbols.draw(getContext(), c, "bedtime", cx, cy, 26 * k, Ui.alpha(ink, ca));
                 continue;
