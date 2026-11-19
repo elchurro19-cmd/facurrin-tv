@@ -4933,6 +4933,21 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 c.restore();
             }
             drawShelfHint(c);
+            if (npWarmPending) {   // once, unseen: everything the player makes on its first open is made now
+                npWarmPending = false;
+                npWarmed = true;
+                float v = npOpen[0].value, t = npOpen[0].target;
+                npOpen[0].value = npOpen[0].target = 1;
+                int sv = c.saveLayerAlpha(0, 0, w, h, 1);
+                try {
+                    drawNpCard(c);
+                } catch (RuntimeException ex) {
+                    AppLog.w("player warm-up: " + ex.getMessage());
+                }
+                c.restoreToCount(sv);
+                npOpen[0].value = v;
+                npOpen[0].target = t;
+            }
             drawNpCard(c);
             drawSleepPanel(c);
             return;
@@ -6219,7 +6234,38 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         handler.post(npTick);
     }
 
+    /**
+     * The player's first open used to stutter: its shadow, its glass, its fonts and the cover's texture were all made
+     * on that frame. Once music shows (and the remote rests), they're made unseen on a quiet frame instead.
+     */
+    private boolean npWarmed, npWarmPending;
+    private int npArtReady = -1;
+    private final Runnable npWarm = new Runnable() {
+        @Override public void run() {
+            NowPlaying np = nowPlaying;
+            if (!running || npWarmed || np == null || !np.visible()) return;
+            if (npOpen[0].value > 0.01f || SystemClock.uptimeMillis() - lastKeyAt < 1500) {
+                handler.postDelayed(this, 1500);   // in use: a little later
+                return;
+            }
+            npWarmPending = true;
+            heroLayer.invalidate();
+        }
+    };
+
     private void onNowPlaying() {
+        NowPlaying cur = nowPlaying;
+        if (cur != null && cur.visible()) {
+            if (!npWarmed) {
+                handler.removeCallbacks(npWarm);
+                handler.postDelayed(npWarm, 1200);
+            }
+            if (cur.version != npArtReady) {   // each new cover goes up to the GPU ahead, not when the player opens
+                npArtReady = cur.version;
+                Bitmap a = cur.artLarge != null ? cur.artLarge : cur.art;
+                if (a != null) a.prepareToDraw();
+            }
+        }
         npExpand[0].target = npCollapsed ? 0 : 1;
         if ((zone == Z_PLAYER || zone == Z_PLAYER_BAR || zone == Z_PLAYER_CTRL) && (nowPlaying == null || !nowPlaying.visible())) {
             zone = Z_TOP;
