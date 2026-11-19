@@ -6322,6 +6322,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                     if (watchSwap) showWatch(watchWaiting);
                     if (watch != null) watchShow[0].snap(1);
                 }
+                if (iconDock() && !watchShown()) return true;   // nothing to open: ↑ stays on the wheel
                 if (watchShown()) {
                     zone = Z_WATCH;   // the bubble rises from the app, on its first card
                     watchIndex = 0;
