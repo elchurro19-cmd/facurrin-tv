@@ -866,6 +866,7 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
         boolean ok = code == android.view.KeyEvent.KEYCODE_DPAD_CENTER || code == android.view.KeyEvent.KEYCODE_ENTER
                 || code == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER;
         if (darkNow) {
+            darkKeyAt = SystemClock.uptimeMillis();   // the controls show for a moment
             if (ok) np.toggle();
             else if (code == android.view.KeyEvent.KEYCODE_DPAD_LEFT) np.previous();
             else if (code == android.view.KeyEvent.KEYCODE_DPAD_RIGHT) np.next();
@@ -899,6 +900,7 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
                     case MC_REPEAT: np.repeat(); break;
                     case MC_MOON:
                         darkNow = true;
+                        darkKeyAt = SystemClock.uptimeMillis();
                         setDark(getContext(), true);
                         musicFocus = MC_PLAY;
                         break;
@@ -916,6 +918,7 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
     }
 
     private android.text.TextPaint mClock, mDate, mDim, mHint;
+    private long darkKeyAt;
 
     private void drawMusicScreen(Canvas c) {
         boolean on = musicOn();
@@ -1073,13 +1076,15 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
         mTime.setAlpha(Math.round((dk ? 75 : 204) * a));
         c.drawText(done, tx, by + 44 * k, mTime);
         c.drawText(total, tr - mTime.measureText(total), by + 44 * k, mTime);
+        // Dark: the controls only for 3 s after a key, then they fade away.
+        float ca = !dk ? a : a * Ui.clamp(1 - (SystemClock.uptimeMillis() - darkKeyAt - 3000) / 600f);
         // The controls: previous, play and next in a glass pill, shuffle and repeat on its sides; the moon at the end.
         float cy = ct + 330 * k, mid = tx + 360 * k, step = 96 * k, ph = 84 * k, pw = 2 * step + 90 * k;
         mRect.set(mid - pw / 2, cy - ph / 2, mid + pw / 2, cy + ph / 2);
-        mFill.setColor(Ui.alpha(dk ? 0xFF141414 : 0x26FFFFFF, a));
+        mFill.setColor(Ui.alpha(dk ? 0xFF141414 : 0x26FFFFFF, ca));
         c.drawRoundRect(mRect, ph / 2, ph / 2, mFill);
         mRing.setStrokeWidth(2 * k);
-        mRing.setColor(Ui.alpha(dk ? 0x1AFFFFFF : 0x66FFFFFF, a));
+        mRing.setColor(Ui.alpha(dk ? 0x1AFFFFFF : 0x66FFFFFF, ca));
         c.drawRoundRect(mRect, ph / 2, ph / 2, mRing);
         for (int i = MC_SHUFFLE; i <= MC_MOON; i++) {
             if (!musicHas(np, i)) continue;
@@ -1088,28 +1093,28 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
             boolean f = i == musicFocus && !dk;
             float r = (i == MC_PLAY ? 36 : 32) * k;
             if (i == MC_MOON && !f) {   // the moon sits on its own glass circle
-                mFill.setColor(Ui.alpha(dk ? 0xFF141414 : 0x26FFFFFF, a));
+                mFill.setColor(Ui.alpha(dk ? 0xFF141414 : 0x26FFFFFF, ca));
                 c.drawCircle(cx, cy, r, mFill);
-                mRing.setColor(Ui.alpha(dk ? 0x1AFFFFFF : 0x66FFFFFF, a));
+                mRing.setColor(Ui.alpha(dk ? 0x1AFFFFFF : 0x66FFFFFF, ca));
                 c.drawCircle(cx, cy, r, mRing);
             }
             if (f) {
-                mFill.setColor(Ui.alpha(0xFFFFFFFF, a));
+                mFill.setColor(Ui.alpha(0xFFFFFFFF, ca));
                 c.drawCircle(cx, cy, r, mFill);
             }
             boolean active = (i == MC_SHUFFLE && np.shuffleOn) || (i == MC_REPEAT && np.repeatMode != 0);
             int ink = dk ? 0x73FFFFFF : f ? 0xFF141414 : active ? musicAccent : 0xF2FFFFFF;
             if (i == MC_MOON) {
-                Symbols.draw(getContext(), c, "bedtime", cx, cy, 26 * k, Ui.alpha(ink, a));
+                Symbols.draw(getContext(), c, "bedtime", cx, cy, 26 * k, Ui.alpha(ink, ca));
                 continue;
             }
             drawMusicGlyph(c, i == MC_PLAY ? (np.playing ? 3 : 1) : i == MC_PREV ? 0 : i == MC_NEXT ? 2 : i == MC_SHUFFLE ? 4 : 5,
-                    cx, cy, (i == MC_PLAY ? 20 : 15) * k, Ui.alpha(ink, a));
+                    cx, cy, (i == MC_PLAY ? 20 : 15) * k, Ui.alpha(ink, ca));
         }
         if (dk) {
-            mHint.setAlpha(Math.round(70 * a));
-            c.drawText("OK pausa  ·  ← → cambia de tema  ·  ↓ vuelve a la luz", w / 2f, h - 70 * k, mHint);
-            postInvalidateDelayed(1000);
+            mHint.setAlpha(Math.round(70 * ca));
+            if (ca > 0.01f) c.drawText("OK pausa  ·  ← → cambia de tema  ·  ↓ vuelve a la luz", w / 2f, h - 70 * k, mHint);
+            postInvalidateDelayed(ca > 0.01f ? 50 : 1000);
             return;
         }
         postInvalidateDelayed(np.playing ? 50 : 500);   // the hill rolls; paused, the times still tick

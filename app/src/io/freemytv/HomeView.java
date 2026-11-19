@@ -5064,17 +5064,17 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         boolean wide = !iconDock();
         float x, y, pw, ph, big, ct, lx, lw, lHead, rStep, th;
         if (wide) {
-            x = 80 * k;
-            y = 172 * k;
-            pw = w - 160 * k;
-            ph = 584 * k;
-            big = 470 * k;
+            x = 36 * k;   // where the cards were (option E): no pane, straight on the background
+            y = 242 * k;
+            pw = w - 72 * k;
+            ph = 520 * k;
+            big = 400 * k;
             ct = y + 88 * k;
-            lx = x + 46 * k + big + 56 * k;
+            lx = x + 44 * k + big + 56 * k;
             lw = 560 * k;
-            lHead = y + 122 * k;
-            rStep = 122 * k;
-            th = 96 * k;
+            lHead = y + 58 * k;
+            rStep = 112 * k;
+            th = 92 * k;
         } else {
             x = (w - BUB_W * k) / 2;
             y = BUB_TOP * k;
@@ -5097,6 +5097,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             bubBig.setShadowLayer(10 * k, 0, 2 * k, 0x99000000);
             bubBigSub = new TextPaint(Ui.text(Ui.regular, 23 * k, 0xD9FFFFFF));
             bubBigSub.setShadowLayer(8 * k, 0, 2 * k, 0x99000000);
+            for (Paint sp : new Paint[] {bubTitle, bubSub, bubHead}) sp.setShadowLayer(10 * k, 0, 2 * k, 0x80000000);
         }
         if (bubFor != wc || bubWide != wide) {   // the texts, cut to fit, once per content
             bubFor = wc;
@@ -5115,12 +5116,14 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             }
         }
         panelRect.set(x, y, x + pw, y + ph);
-        tmp.set(panelRect);
-        tmp.offset(0, 18 * k);
-        shadow.setColor(Ui.alpha(0xFF000000, 0.4f));
-        shadows.draw(c, tmp, 44 * k, SHADOW_BLUR * 1.6f * k, shadow);
-        scene.liquid(c, panelRect, 44 * k, tone(0xFFFFFFFF, SMOKE), tone(0.55f, 0.5f), tone(0.02f, 0.01f), 12 * k, 8 * k,
-                tone(0.6f, 0.45f), 1);
+        if (!wide) {
+            tmp.set(panelRect);
+            tmp.offset(0, 18 * k);
+            shadow.setColor(Ui.alpha(0xFF000000, 0.4f));
+            shadows.draw(c, tmp, 44 * k, SHADOW_BLUR * 1.6f * k, shadow);
+            scene.liquid(c, panelRect, 44 * k, tone(0xFFFFFFFF, SMOKE), tone(0.55f, 0.5f), tone(0.02f, 0.01f), 12 * k, 8 * k,
+                    tone(0.6f, 0.45f), 1);
+        }
         // The heading, with a dot of the app's colour.
         float hx = x + 44 * k, hb = y + 58 * k;
         if (watchColor != 0xFFFFFFFF) {
@@ -5196,7 +5199,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         // Spotify: its popular playlists. Wide: a 2×2 on the right, the names under them; square: a row under the list.
         if (ns > 0) {
             float px = wide ? lx + lw + 60 * k : lx, py = wide ? lHead : y + 470 * k;
-            float item = (wide ? 150 : 88) * k, stepX = (wide ? 250 : 102) * k, stepY = 200 * k;
+            float item = (wide ? 140 : 88) * k, stepX = (wide ? 240 : 102) * k, stepY = 190 * k;
             c.drawText("PLAYLISTS POPULARES", px, py, bubHead);
             for (int i = 0; i < ns; i++) {
                 float f = Ui.clamp(actFocus[i].value);
