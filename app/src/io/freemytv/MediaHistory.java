@@ -162,6 +162,8 @@ final class MediaHistory implements MediaSessionManager.OnActiveSessionsChangedL
         return comma > 0 ? a.substring(0, comma) : a;
     }
 
+    private static boolean loggedKeys;
+
     private void save(MediaController m) {
         MediaMetadata md = m.getMetadata();
         if (md == null) return;
@@ -173,8 +175,15 @@ final class MediaHistory implements MediaSessionManager.OnActiveSessionsChangedL
         if (music) {
             it.title = artist(md);
             it.sub = title;
+            // The track itself when Spotify says which (OK on it plays it); its artist otherwise.
+            String track = text(md, MediaMetadata.METADATA_KEY_MEDIA_ID, "com.spotify.music.extra.TRACK_URI",
+                    "com.spotify.music.extra.URI");
             String uri = text(md, "com.spotify.music.extra.ARTIST_URI");
-            it.uri = uri.startsWith("spotify:") ? uri : null;
+            it.uri = track.startsWith("spotify:track:") ? track : uri.startsWith("spotify:") ? uri : null;
+            if (!loggedKeys) {
+                loggedKeys = true;
+                AppLog.w("spotify metadata keys: " + md.keySet() + " id=" + text(md, MediaMetadata.METADATA_KEY_MEDIA_ID));
+            }
         } else {
             it.title = title;
             it.sub = text(md, MediaMetadata.METADATA_KEY_ARTIST, MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE);

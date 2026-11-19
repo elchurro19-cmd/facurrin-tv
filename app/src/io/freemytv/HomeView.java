@@ -4915,16 +4915,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         String q = (e.title + " " + e.sub).trim();
         if (q.isEmpty()) return false;
         Context ctx = getContext();
-        if (nowPlaying != null && nowPlaying.playFromSearch(e.pkg, q)) {   // Spotify's session plays it in place
-            click.open();
-            AppLog.w("song: playFromSearch " + q);
-            return true;
-        }
-        android.content.Intent play = new android.content.Intent(android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
-                .setPackage(e.pkg)
-                .putExtra(android.app.SearchManager.QUERY, q)
-                .putExtra(android.provider.MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
-                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+        android.content.Intent play = e.uri != null && e.uri.startsWith("spotify:track:")
+                ? new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(e.uri)).setPackage(e.pkg)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                : new android.content.Intent("none");
         android.content.Intent search = new android.content.Intent(android.content.Intent.ACTION_VIEW,
                 android.net.Uri.parse("spotify:search:" + android.net.Uri.encode(q))).setPackage(e.pkg)
                 .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -6429,42 +6423,58 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                     if (!shelf.isEmpty()) shelfIndex = nearest(tileRects, tileRects.length, cardRects[cardIndex].centerX());
                 }
                 break;
-            case Z_WATCH:
-                if (watchRow == 0) {   // the list goes up and down
-                    int n = Math.min(3, watch.items.size());
-                    if (dx != 0) return true;
-                    if (dy < 0 && watchIndex > 0) {
-                        watchIndex--;
-                        break;
-                    }
-                    if (dy > 0 && watchIndex < n - 1) {
-                        watchIndex++;
-                        break;
-                    }
-                }
-                if (dx != 0 && watchRow == 1) {
-                    int next = Math.max(0, Math.min(panelSmallCount() - 1, actIndex + dx));
-                    if (next == actIndex) return true;
-                    actIndex = next;
-                } else if (dx != 0) {
-                    int next = Math.max(0, Math.min(Math.min(3, watch.items.size()) - 1, watchIndex + dx));
-                    if (next == watchIndex) return true;
-                    watchIndex = next;
-                } else if (dy < 0) {
-                    if (watchRow == 1) {
-                        watchRow = 0;   // back up to the big cards
-                        watchIndex = Math.min(3, watch.items.size()) - 1;
+            case Z_WATCH: {
+                // Moves as it looks. Íconos: the list, the playlists in a row under it. Tarjetas: the list, the
+                // playlists in a 2×2 to its right.
+                int n = Math.min(3, watch.items.size()), ns = panelSmallCount();
+                boolean wide = !iconDock();
+                if (watchRow == 0) {
+                    if (dy != 0) {
+                        int nx = watchIndex + dy;
+                        if (nx >= 0 && nx < n) watchIndex = nx;
+                        else if (dy < 0) {
+                            zone = Z_TOP;
+                            topIndex = 3;
+                        } else if (!wide && ns > 0) {
+                            watchRow = 1;
+                            actIndex = 0;
+                        } else zone = Z_SHELF;
+                    } else if (dx > 0 && ns > 0) {   // → to the playlists, on the nearest one
+                        watchRow = 1;
+                        actIndex = wide ? Math.min(ns - 1, watchIndex >= 2 ? 2 : 0) : 0;
+                    } else return true;
+                } else if (wide) {
+                    int col = actIndex % 2, row = actIndex / 2;
+                    if (dx != 0) {
+                        int nc = col + dx;
+                        if (nc < 0) {   // ← from the left column: back to the list
+                            watchRow = 0;
+                            watchIndex = Math.min(n - 1, row == 0 ? 0 : 2);
+                        } else if (nc > 1 || row * 2 + nc >= ns) return true;
+                        else actIndex = row * 2 + nc;
                     } else {
-                        zone = Z_TOP;
-                        topIndex = 3;
+                        int nr = row + dy;
+                        if (nr < 0) {
+                            zone = Z_TOP;
+                            topIndex = 3;
+                        } else if (nr * 2 + col >= ns) zone = Z_SHELF;
+                        else actIndex = nr * 2 + col;
                     }
-                } else if (watchRow == 0 && panelSmallCount() > 0) {
-                    watchRow = 1;   // down to the playlists
-                    actIndex = 0;
                 } else {
-                    zone = Z_SHELF;   // back down to the apps
+                    if (dx != 0) {
+                        int nx = actIndex + dx;
+                        if (nx < 0) {   // ← from the first: back to the list
+                            watchRow = 0;
+                            watchIndex = n - 1;
+                        } else if (nx >= ns) return true;
+                        else actIndex = nx;
+                    } else if (dy < 0) {
+                        watchRow = 0;
+                        watchIndex = n - 1;
+                    } else zone = Z_SHELF;
                 }
                 break;
+            }
             case Z_RECENT:
                 if (dx != 0) {
                     int next = Math.max(0, Math.min(recent.size() - 1, recentIndex + dx));
