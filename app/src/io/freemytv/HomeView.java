@@ -588,6 +588,48 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     }
 
     /** One layer of the screen. It draws in full-screen coordinates: the glass needs each pixel's real position. */
+    private SceneView sceneSkyView, sceneLandView;
+
+    /** The scene's two pictures, each drawn once: the sky (moved by its translation) and the mountains with the scrims. */
+    private final class SceneView extends View {
+        private final boolean isSky;
+        private final RectF bounds = new RectF();
+
+        SceneView(Context c, boolean isSky) {
+            super(c);
+            this.isSky = isSky;
+        }
+
+        @Override protected void onDraw(Canvas c) {
+            Bitmap b = isSky ? sceneSky : sceneLand;
+            if (b == null) return;
+            bounds.set(0, 0, getWidth(), getHeight());
+            c.drawBitmap(b, null, bounds, scenePaint);
+            if (b != null) return;   // the scrims are in the mountains' picture already
+            if (sceneScrimLeft == null) {
+                float sw = getWidth(), sh = getHeight();
+                sceneScrimLeft = new LinearGradient(0, 0, sw * 0.6f, 0, new int[] {0x99000000, 0x4D000000, 0x00000000},
+                        new float[] {0, 0.55f, 1}, Shader.TileMode.CLAMP);
+                sceneScrimBottom = new LinearGradient(0, sh, 0, sh * 0.55f, 0x8C000000, 0x00000000, Shader.TileMode.CLAMP);
+            }
+            c.drawColor(0x40000000);
+            scrimPaint.setShader(sceneScrimLeft);
+            c.drawRect(bounds, scrimPaint);
+            scrimPaint.setShader(sceneScrimBottom);
+            c.drawRect(0, bounds.bottom * 0.55f, bounds.right, bounds.bottom, scrimPaint);
+        }
+
+        @Override public boolean hasOverlappingRendering() {
+            return false;
+        }
+    }
+
+    private final Paint scrimPaint = new Paint(Paint.DITHER_FLAG);
+
+    private boolean sceneOn() {
+        return sceneSky != null && sceneLand != null;
+    }
+
     private final class Layer extends View {
         private final int kind;
 
@@ -668,6 +710,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         tvInputs = (TvInputManager) a.getSystemService(Context.TV_INPUT_SERVICE);
         setFocusable(true);
         sky = new Layer(a, SKY);
+        sceneSkyView = new SceneView(a, true);
+        sceneLandView = new SceneView(a, false);
+        sceneSkyView.setVisibility(GONE);
+        sceneLandView.setVisibility(GONE);
         heroLayer = new Layer(a, HERO);
         status = new Layer(a, STATUS);
         platter = new Layer(a, PLATTER);
@@ -692,7 +738,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         dimLayer.setVisibility(GONE);
         veilLayer = new View(a);
         veilLayer.setVisibility(GONE);
-        for (View v : new View[] {sky, veilLayer, heroLayer, watchLayer, status, platter, tiles, drawerLayer, sheetLayer, toastLayer, dimLayer}) {
+        for (View v : new View[] {sky, sceneSkyView, sceneLandView, veilLayer, heroLayer, watchLayer, status, platter, tiles, drawerLayer, sheetLayer, toastLayer, dimLayer}) {
             v.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);   // TalkBack reads the items (Spoken)
             addView(v);
         }
@@ -882,9 +928,12 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     /** About 15 frames a second while the scene shows, and only then: the sky moves a few pixels a second. */
     private final Runnable sceneTick = new Runnable() {
         @Override public void run() {
-            if (!running || sceneSky == null) return;
-            sky.invalidate();
-            handler.postDelayed(this, 66);
+            if (!running || !sceneOn()) return;
+            float room = Math.max(0, sceneSkyView.getWidth() - w);
+            float t = (SystemClock.uptimeMillis() % SCENE_DRIFT_MS) / (float) SCENE_DRIFT_MS;   // 0 → 1
+            float u = t < 0.5f ? t * 2 : 2 - t * 2, ease = u * u * (3 - 2 * u);
+            sceneSkyView.setTranslationX(-room * ease);   // only moves it: nothing is drawn again
+            handler.postDelayed(this, idleMode() ? 500 : 50);   // 20 a second: the sky moves under a pixel each
         }
     };
 
@@ -918,8 +967,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             int[] frost = null;
             try {
                 android.content.res.AssetManager am = ctx.getAssets();
+                android.graphics.BitmapFactory.Options op = new android.graphics.BitmapFactory.Options();
+                op.inPreferredConfig = Bitmap.Config.RGB_565;   // a sky needs no transparency: half the memory
                 try (java.io.InputStream in = am.open("scene/sky_" + state + ".jpg")) {
-                    skyB = android.graphics.BitmapFactory.decodeStream(in);
+                    skyB = android.graphics.BitmapFactory.decodeStream(in, null, op);
                 }
                 Bitmap raw;
                 try (java.io.InputStream in = am.open("scene/land.webp")) {
@@ -945,6 +996,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 lp.setColorFilter(new android.graphics.ColorMatrixColorFilter(cm));
                 new Canvas(landB).drawBitmap(raw, null, new RectF(0, 0, Backdrop.W, Backdrop.H), lp);
                 raw.recycle();
+                Bitmap landScrimmed = landB.copy(Bitmap.Config.ARGB_8888, true);
+                withWallpaperScrims(landScrimmed);   // the scrims once, here, not on every frame
                 // A still copy (the sky at its start) for the glass's blur and the first frame.
                 made = Bitmap.createBitmap(Backdrop.W, Backdrop.H, Bitmap.Config.ARGB_8888);
                 Canvas mc = new Canvas(made);
@@ -953,6 +1006,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 mc.drawBitmap(landB, 0, 0, null);
                 withWallpaperScrims(made);
                 frost = wallpaperFrost(made);
+                made = Backdrop.gpu(made);   // GPU-only copies: nothing left in the app's own memory
+                skyB = Backdrop.gpu(skyB);
+                landB.recycle();
+                landB = Backdrop.gpu(landScrimmed);
             } catch (Exception | OutOfMemoryError e) {
                 AppLog.w("scene: " + e.getMessage());
             }
@@ -964,6 +1021,12 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 sceneSky = fs;
                 sceneLand = fl;
                 sceneKey = state;
+                sceneScrimLeft = null;
+                sceneSkyView.setVisibility(VISIBLE);
+                sceneLandView.setVisibility(VISIBLE);
+                requestLayout();
+                sceneSkyView.invalidate();
+                sceneLandView.invalidate();
                 wallpaperBefore = null;
                 wallpaper = fm;
                 wallpaperKey = SCENE;
@@ -977,34 +1040,32 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         });
     }
 
+    /** An app opened (or the background changed): the scene's pictures go; `keep` leaves the still copy to show. */
+    void releaseScene(boolean keep) {
+        handler.removeCallbacks(sceneTick);
+        sceneSky = sceneLand = null;
+        sceneKey = "";
+        if (sceneSkyView != null) {
+            sceneSkyView.setVisibility(GONE);
+            sceneLandView.setVisibility(GONE);
+        }
+        if (!keep && SCENE.equals(wallpaperKey)) {
+            wallpaper = null;
+            wallpaperKey = "";
+        }
+        sky.invalidate();
+    }
+
+    /** No key for a minute: what only decorates (the sky's drift, the equalizer) slows right down. */
+    private long lastKeyAt = SystemClock.uptimeMillis();
+
+    private boolean idleMode() {
+        return SystemClock.uptimeMillis() - lastKeyAt > 60_000;
+    }
+
     private void restartScene() {
         handler.removeCallbacks(sceneTick);
         if (running && sceneSky != null) handler.post(sceneTick);
-    }
-
-    /** The scene: the sky drifting slowly behind, the mountains still in front, the scrims for the text on top. */
-    private boolean drawScene(Canvas c) {
-        Bitmap s = sceneSky, l = sceneLand;
-        if (s == null || l == null) return false;
-        float scale = h / (float) s.getHeight(), sw = s.getWidth() * scale, room = Math.max(0, sw - w);
-        float t = (SystemClock.uptimeMillis() % SCENE_DRIFT_MS) / (float) SCENE_DRIFT_MS;   // 0 → 1
-        float u = t < 0.5f ? t * 2 : 2 - t * 2, ease = u * u * (3 - 2 * u);
-        float x = -room * ease;
-        tmp.set(x, 0, x + sw, h);
-        c.drawBitmap(s, null, tmp, scenePaint);
-        c.drawBitmap(l, null, screen, scenePaint);
-        if (sceneScrimLeft == null || sceneScrimLeft == null) {
-            sceneScrimLeft = new LinearGradient(0, 0, w * 0.6f, 0, new int[] {0x99000000, 0x4D000000, 0x00000000},
-                    new float[] {0, 0.55f, 1}, Shader.TileMode.CLAMP);
-            sceneScrimBottom = new LinearGradient(0, h, 0, h * 0.55f, 0x8C000000, 0x00000000, Shader.TileMode.CLAMP);
-        }
-        c.drawColor(0x40000000);
-        fill.setShader(sceneScrimLeft);
-        c.drawRect(0, 0, w, h, fill);
-        fill.setShader(sceneScrimBottom);
-        c.drawRect(0, h * 0.55f, w, h, fill);
-        fill.setShader(null);
-        return true;
     }
 
     private void updateWallpaper() {
@@ -1014,11 +1075,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             updateScene(ctx);
             return;
         }
-        if (sceneSky != null) {   // the scene was on: it goes
-            sceneSky = sceneLand = null;
-            sceneKey = "";
-            handler.removeCallbacks(sceneTick);
-        }
+        if (sceneSky != null || sceneLand != null) releaseScene(false);   // the scene was on: it goes
         boolean wanted = Gallery.photos(kind);
         if (wanted != wallpaperWanted) {
             wallpaperWanted = wanted;
@@ -1312,6 +1369,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         int width = r - l, height = b - t;
         float kk = width / 1920f;
         sky.layout(0, 0, width, height);
+        Bitmap ss = sceneSky;   // the sky is wider than the screen: it slides
+        sceneSkyView.layout(0, 0, ss == null ? width : Math.round(ss.getWidth() * height / (float) ss.getHeight()), height);
+        sceneLandView.layout(0, 0, width, height);
         veilLayer.layout(0, 0, width, height);
         place(heroLayer, 0, 0);
         watchLayer.layout(0, 0, width, height);
@@ -3734,6 +3794,12 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     // MARK: - Keys: only the arrows, OK and Back (system keys pass through to the system)
 
     boolean onKey(KeyEvent e) {
+        boolean wasIdle = idleMode();
+        lastKeyAt = SystemClock.uptimeMillis();
+        if (wasIdle) {   // back from idle: everything moves at full speed again
+            restartScene();
+            restartTick();
+        }
         wake();
         boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
         if (gridMove) return gridMoveKey(e, down);
@@ -4189,7 +4255,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
         final HomeApps.Item item = it;
         final RectF from = new RectF(r);
-        if (item.kind != HomeApps.QUICK_SETTINGS) dimInHome();   // the panel leaves Home in view: nothing to hand over
+        if (item.kind != HomeApps.QUICK_SETTINGS) {
+            dimInHome();   // the panel leaves Home in view: nothing to hand over
+            handler.removeCallbacks(sceneTick);   // the GPU and the CPU go to the app starting
+            handler.removeCallbacks(npTick);
+        }
         boolean opened = HomeApps.open(activity, item, this, Math.round(from.left), Math.round(from.top),
                 Math.round(from.width()), Math.round(from.height()));
         if (!opened) showToast(Ui.trf("Couldn't open {app}.", "app", item.label));
@@ -4707,6 +4777,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     }
 
     private void drawLightSky(Canvas c) {
+        if (sceneOn() && bgTo == null && bgFadeAt == 0) return;   // the scene's views cover the screen
         long up = SystemClock.uptimeMillis();
         float e = bgFadeAt == 0 ? 1 : fadeEase(bgFadeAt, up);
         boolean fading = bgFadeAt != 0;
@@ -4733,9 +4804,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             fill.setShader(null);
             fill.setColorFilter(null);
             fill.setDither(false);
-            if (sceneSky != null && drawScene(c)) {
-                // the scene draws itself (moving)
-            } else if (wallpaper != null) {
+            if (wallpaper != null) {
                 imagePaint.setColorFilter(v);
                 if (wallpaperBefore != null && wallpaperAlpha < 1) {
                     imagePaint.setAlpha(255);
@@ -6141,7 +6210,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 }
                 wake();
             }
-            if (eq) handler.postDelayed(this, EQ_FRAME);
+            if (eq) handler.postDelayed(this, idleMode() ? 1000 : EQ_FRAME);   // idle: the bars barely move
         }
     };
 

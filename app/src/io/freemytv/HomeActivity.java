@@ -25,6 +25,7 @@ public class HomeActivity extends Activity {
 
     @Override protected void onStop() {
         shown = false;
+        if (home != null) home.releaseScene(true);   // an app is in front: its memory, not our scene's
         super.onStop();
     }
 
