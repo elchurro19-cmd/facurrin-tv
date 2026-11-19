@@ -3669,6 +3669,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         } else if (zone == Z_WATCH) {
             if (watch == null || watchIndex >= watch.items.size()) return;
             WatchNext.Entry e = watch.items.get(watchIndex);
+            if (WatchNext.SPOTIFY.equals(e.pkg) && playSong(e)) return;
             String label = shelfLabel(e.pkg);
             it = e.uri != null ? HomeApps.app(e.pkg, label, e.uri) : HomeApps.app(e.pkg, label);
             r = watchRects[watchIndex];
@@ -4907,6 +4908,33 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
         watchDirty = true;
         wake();
+    }
+
+    /** A song from the history: Spotify plays it (search and play); if it can't, its search opens on that song. */
+    private boolean playSong(WatchNext.Entry e) {
+        String q = (e.title + " " + e.sub).trim();
+        if (q.isEmpty()) return false;
+        Context ctx = getContext();
+        android.content.Intent play = new android.content.Intent(android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
+                .setPackage(e.pkg)
+                .putExtra(android.app.SearchManager.QUERY, q)
+                .putExtra(android.provider.MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+        android.content.Intent search = new android.content.Intent(android.content.Intent.ACTION_VIEW,
+                android.net.Uri.parse("spotify:search:" + android.net.Uri.encode(q))).setPackage(e.pkg)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+        for (android.content.Intent in : new android.content.Intent[] {play, search}) {
+            try {
+                if (in.resolveActivity(ctx.getPackageManager()) == null) continue;
+                click.open();
+                ctx.startActivity(in);
+                AppLog.w("song: " + in.getAction() + " " + q);
+                return true;
+            } catch (Exception ex) {
+                AppLog.w("song " + in.getAction() + ": " + ex.getMessage());
+            }
+        }
+        return false;
     }
 
     private String shelfLabel(String pkg) {

@@ -853,7 +853,7 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
 
     private boolean musicOn() {
         NowPlaying np = nowPlaying;
-        return np != null && np.playingVisible();
+        return np != null && np.visible();   // paused too (for a while), so play brings it back
     }
 
     /**
