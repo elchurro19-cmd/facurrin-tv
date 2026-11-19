@@ -91,6 +91,8 @@ final class HomeData {
     volatile List<Futbol.Match> matches = new ArrayList<>();
     /** Every game of the coming week, for the drawer card. */
     volatile List<Futbol.Match> upcoming = new ArrayList<>();
+    /** The club's live, next and last game (and others): the team card's last result comes from here. */
+    volatile List<Futbol.Match> highlights = new ArrayList<>();
     volatile long matchesAt;
     private volatile boolean fetchingMatches;
     private volatile long matchesFailedAt;
@@ -154,6 +156,7 @@ final class HomeData {
 
     private void publish(Futbol.Result r) {
         upcoming = r.upcoming;
+        highlights = r.highlights;
         // The home screen rotates through these: the big games being played now, else Racing's of the day or next.
         matches = new ArrayList<>(r.featured);
         matchesAt = System.currentTimeMillis();

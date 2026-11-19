@@ -2122,6 +2122,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         Futbol.Match best = null;
         java.util.List<Futbol.Match> all = new java.util.ArrayList<>(data.matches);
         all.addAll(data.upcoming);
+        all.addAll(data.highlights);   // the last game played is only here
         for (Futbol.Match m : all) {
             if (!m.club() || m.done() != done) continue;
             if (best == null) best = m;
@@ -2858,16 +2859,16 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             crestFor[slot] = crest;
             try {
                 Bitmap src = crest.getConfig() == Bitmap.Config.HARDWARE ? crest.copy(Bitmap.Config.ARGB_8888, false) : crest;
-                int n = 96, in = 60, ih = Math.max(1, Math.round(in * (float) src.getHeight() / Math.max(1, src.getWidth())));
+                int n = 128, in = 96, ih = Math.max(1, Math.round(in * (float) src.getHeight() / Math.max(1, src.getWidth())));
                 Bitmap sq = Bitmap.createBitmap(n, n, Bitmap.Config.ARGB_8888);
                 Canvas cc = new Canvas(sq);
                 Paint pp = new Paint(Paint.FILTER_BITMAP_FLAG);
                 cc.drawBitmap(src, null, new RectF((n - in) / 2f, (n - ih) / 2f, (n + in) / 2f, (n + ih) / 2f), pp);
                 int[] px = new int[n * n], tmpPx = new int[n * n];
                 sq.getPixels(px, 0, n, 0, 0, n, n);
-                for (int pass = 0; pass < 3; pass++) {
-                    boxBlurAlpha(px, tmpPx, n, n, 5, true);
-                    boxBlurAlpha(tmpPx, px, n, n, 5, false);
+                for (int pass = 0; pass < 2; pass++) {   // soft, but still the crest
+                    boxBlurAlpha(px, tmpPx, n, n, 2, true);
+                    boxBlurAlpha(tmpPx, px, n, n, 2, false);
                 }
                 sq.setPixels(px, 0, n, 0, 0, n, n);
                 crestSoft[slot] = sq;
@@ -2914,7 +2915,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         fill.setColor(0xFF0D1726);
         c.drawRect(r, fill);
         // Behind: each crest huge and soft, on its side.
-        float big = r.height() * 1.5f * 96 / 60;
+        float big = r.height() * 1.1f * 128 / 96;   // the crest inside about the card's height
         Bitmap[] soft = {softCrest(0, m.home.crest), softCrest(1, m.away.crest)};
         float[] at = {r.left + 210 * k, r.right - 210 * k};
         bitmapPaint.setFilterBitmap(true);
@@ -2922,11 +2923,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             if (soft[j] == null) continue;
             float bh = big * soft[j].getHeight() / Math.max(1f, soft[j].getWidth());
             cell.set(at[j] - big / 2, r.centerY() - bh / 2, at[j] + big / 2, r.centerY() + bh / 2);
-            bitmapPaint.setAlpha(150);
+            bitmapPaint.setAlpha(190);
             c.drawBitmap(soft[j], null, cell, bitmapPaint);
         }
         bitmapPaint.setAlpha(255);
-        fill.setColor(0x66000000);
+        fill.setColor(0x47000000);
         c.drawRect(r, fill);
         c.restore();
         focusRing.setStrokeWidth(2 * k);
