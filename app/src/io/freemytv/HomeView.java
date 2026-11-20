@@ -1520,6 +1520,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         long up = SystemClock.uptimeMillis();
 
         boolean tilesMoving = step(tileFocus, dt);
+        if (step(allReveal, dt) && !iconDock()) {   // the All Apps square grows in (or out): the bar makes room
+            layoutShelf();
+            tilesMoving = true;
+            platter.invalidate();
+        }
         if (step(dockScroll, dt) && iconDock()) {   // the carousel slides: the icons move under the focus
             layoutShelf();
             tilesMoving = true;
@@ -2107,12 +2112,15 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         for (HomeApps.Item it : shelf) if (it.kind == HomeApps.ALL_APPS) squares++;
         float tw = Math.min(L_TILE_H * 16f / 9 * k, (full - Math.max(0, n - 1) * gap) / Math.max(1f, n - squares + squares * 9f / 16));
         float th = tw * 9f / 16;
-        float width = (n - squares) * tw + squares * th + Math.max(0, n - 1) * gap, left = (w - width) / 2f;
+        float rv = Ui.clamp(allReveal[0].value);
+        float width = (n - squares) * tw + squares * (th + gap) * rv + Math.max(0, n - 1 - squares) * gap, left = (w - width) / 2f;
         float top = (L_PLATTER_TOP + L_TILE_H) * k - th;
         platterRect.set(left - pad, top, left + width + pad, top + th + 2 * pad);
         float x = left, y = top + pad;
         for (int i = 0; i < n; i++) {
-            float iw = shelf.get(i).kind == HomeApps.ALL_APPS ? th : tw;
+            boolean sq = shelf.get(i).kind == HomeApps.ALL_APPS;
+            float iw = sq ? th * rv : tw;
+            if (sq) x += gap * rv - gap;   // its gap grows with it
             tileRects[i].set(x, y, x + iw, y + th);
             x += iw + gap;
         }
@@ -3097,10 +3105,19 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private TextPaint teamName, teamHuge, teamLabel, teamPill;
     private final android.graphics.Path teamClip = new android.graphics.Path();
 
-    private TextPaint allAppsLabel;
+    /** The cards' All Apps square: hidden (no room taken) until → past the last app reveals it. */
+    private final Spring[] allReveal = {new Spring(0.3f, 0.86f, 0)};
+    private boolean allArmed;
+
+    private int allAppsAt() {
+        if (iconDock() || shelf.isEmpty()) return -1;
+        int last = shelf.size() - 1;
+        return shelf.get(last).kind == HomeApps.ALL_APPS && last > 0 ? last : -1;
+    }
 
     /** The cards' last tile: All Apps, a rounded square of glass with nine dots and its name; focused, white. */
     private void drawAllAppsSquare(Canvas c, int i, HomeApps.Item it) {
+        if (tileRects[i].width() < 2 * k) return;   // hidden
         float f = Ui.clamp(tileFocus[i].value), s = 1 + FOCUS_GROW * f;
         RectF base = tileRects[i];
         float cx = base.centerX(), cy = base.centerY() - 6 * k * f, half = base.width() * s / 2;
@@ -3118,19 +3135,13 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         c.drawRoundRect(cell, r, r, focusRing);
         int ink = blend(0xFFFFFFFF, INK, f);
         fill.setColor(ink);
-        float q = cell.width(), d = q * 0.085f, gx = cell.left + q * 0.5f, gy = cell.top + q * 0.4f;
+        float q = cell.width(), d = q * 0.09f, gx = cell.left + q * 0.5f, gy = cell.top + q * 0.5f;
         for (int row = 0; row < 3; row++) for (int col = 0; col < 3; col++) {
             float px = gx + (col - 1) * q * 0.16f, py = gy + (row - 1) * q * 0.16f;
             tmp.set(px - d / 2, py - d / 2, px + d / 2, py + d / 2);
             c.drawRoundRect(tmp, d * 0.25f, d * 0.25f, fill);
         }
-        if (allAppsLabel == null) {
-            allAppsLabel = new TextPaint(Ui.text(Ui.semibold, 21 * k, 0xFFFFFFFF));
-            allAppsLabel.setTextAlign(Paint.Align.CENTER);
-        }
-        allAppsLabel.setTextSize(21 * k * s);
-        allAppsLabel.setColor(ink);
-        c.drawText("Todas las apps", cx, cell.top + q * 0.84f, allAppsLabel);
+        // (no label: the nine dots say it)
     }
 
     /** One box-blur pass over ARGB pixels (each channel, alpha too), along rows or columns. */
@@ -3793,6 +3804,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         boolean topChanged = aim(topFocus, !sheetOpen && zone == Z_TOP ? topIndex : -1, snap);
         heroChanged |= aim(cardFocus, !sheetOpen && zone == Z_CARDS ? cardIndex : -1, snap) | topChanged;
         heroChanged |= aim(recentFocus, !sheetOpen && zone == Z_RECENT ? recentIndex : -1, snap);
+        int aa = allAppsAt();
+        if (aa >= 0 && shelfIndex == aa && !allArmed) shelfIndex = aa - 1;   // hidden: not a place to land on
+        allReveal[0].target = aa >= 0 && zone == Z_SHELF && shelfIndex == aa && !sheetOpen ? 1 : 0;
+        if (snap) allReveal[0].snap(allReveal[0].target);
         if (shelfIndex < shelf.size()) {   // the nearest turn of the wheel that has this app in the middle
             int n = shelf.size();
             dockScroll[0].target = shelfIndex + n * Math.round((dockScroll[0].target - shelfIndex) / n);
@@ -4268,6 +4283,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                     int next = iconDock() && shelf.size() > 1 ? (shelfIndex + dx + shelf.size()) % shelf.size()
                             : Math.max(0, Math.min(shelf.size() - 1, shelfIndex + dx));
                     if (next == shelfIndex) return;
+                    allArmed = next == allAppsAt();   // only → from the last app gets there
                     shelfIndex = next;
                 } else if (dy < 0) {
                     if (hero != null && hero.button) {
@@ -4802,7 +4818,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     /** Swaps the lifted app with its neighbor; both slide from where they are to their new slots. */
     private void shiftReorder(int dx) {
         int i = shelfIndex, j = i + dx;
-        if (j < 0 || j >= shelf.size()) return;
+        if (j < 0 || j >= shelf.size() || shelf.get(j).kind == HomeApps.ALL_APPS) return;
         HomeApps.Item it = shelf.get(i);
         shelf.set(i, shelf.get(j));
         shelf.set(j, it);
