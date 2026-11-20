@@ -717,7 +717,7 @@ public class SettingsActivity extends Activity {
         private static final int[] PHOTO_SECONDS = {15, 30, 60, 300};
         private static final String[] PHOTO_SECONDS_NAMES = {"15 segundos", "30 segundos", "1 minuto", "5 minutos"};
         private static final int CHANGE_NOW_ROW = 2, FAVORITE_ROW = 3, MY_FAVORITES_ROW = 7, ORDER_ROW = 8;
-        private static final String[] THEME_CHOICES = {"off", Gallery.HALLOWEEN, Gallery.CHRISTMAS, Gallery.NEW_YEAR,
+        static final String[] THEME_CHOICES = {"off", Gallery.HALLOWEEN, Gallery.CHRISTMAS, Gallery.NEW_YEAR,
                 Gallery.CARNIVAL, Gallery.EASTER, Gallery.BIRTHDAY};
 
         private static int indexOf(int[] values, int v) {
@@ -808,7 +808,7 @@ public class SettingsActivity extends Activity {
         }
 
         /** The Liga Profesional's clubs and South America's national teams, as ESPN ids. */
-        private static final String[][] CLUBS = {
+        static final String[][] CLUBS = {
             {"9739", "Aldosivi"}, {"3", "Argentinos Juniors"}, {"9785", "Atlético Tucumán"}, {"235", "Banfield"},
             {"10060", "Barracas Central"}, {"4", "Belgrano"}, {"5", "Boca Juniors"}, {"11989", "Central Córdoba"},
             {"8950", "Defensa y Justicia"}, {"8", "Estudiantes"}, {"19685", "Estudiantes (RC)"}, {"11972", "Gimnasia (M)"},
@@ -816,11 +816,11 @@ public class SettingsActivity extends Activity {
             {"2975", "Instituto"}, {"12", "Lanús"}, {"14", "Newell's"}, {"7764", "Platense"}, {"15", "Racing Club"},
             {"17702", "Riestra"}, {"16", "River Plate"}, {"17", "Rosario Central"}, {"18", "San Lorenzo"},
             {"10158", "Sarmiento"}, {"19", "Talleres"}, {"7767", "Tigre"}, {"20", "Unión"}, {"21", "Vélez Sarsfield"}};
-        private static final String[][] NATIONS = {
+        static final String[][] NATIONS = {
             {"202", "Argentina"}, {"204", "Bolivia"}, {"205", "Brasil"}, {"207", "Chile"}, {"208", "Colombia"},
             {"209", "Ecuador"}, {"210", "Paraguay"}, {"211", "Perú"}, {"212", "Uruguay"}, {"213", "Venezuela"}};
 
-        private static int indexOf(String[][] teams, String id) {
+        static int indexOf(String[][] teams, String id) {
             for (int i = 0; i < teams.length; i++) if (teams[i][0].equals(id)) return i;
             return 0;
         }
@@ -862,7 +862,7 @@ public class SettingsActivity extends Activity {
         }
 
         /** "auto", then English and every language with a catalogue. */
-        private static String[] languageChoices() {
+        static String[] languageChoices() {
             String[] all = Ui.languages();
             String[] v = new String[all.length + 1];
             v[0] = "auto";

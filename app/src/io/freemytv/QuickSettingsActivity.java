@@ -142,9 +142,32 @@ public class QuickSettingsActivity extends Activity {
         private final List<String> sectNames = new ArrayList<>(), sectIcons = new ArrayList<>();
         private final List<List<Tile>> sectTiles = new ArrayList<>();
         private int sect, side;   // side 0: the rail, 1: the section's rows (focus is the row)
+        /** A list shown in place of the section's rows (the city's results, the shelf's apps): Back leaves it. */
+        private List<Tile> subList;
+        private String subTitle = "";
+        private int subFrom;
+
+        private List<Tile> rows() {
+            return subList != null ? subList : sectTiles.get(sect);
+        }
+
+        private void openSub(String title, List<Tile> list) {
+            subFrom = focus;
+            subTitle = title;
+            subList = list;
+            focus = 0;
+            side = 1;
+            invalidate();
+        }
+
+        private void closeSub() {
+            subList = null;
+            focus = subFrom;
+            invalidate();
+        }
 
         private Tile curTile() {
-            List<Tile> l = sectTiles.get(sect);
+            List<Tile> l = rows();
             return l.get(Math.max(0, Math.min(l.size() - 1, focus)));
         }
 
@@ -266,9 +289,18 @@ public class QuickSettingsActivity extends Activity {
             home.add(toggle("Fútbol", "sparkles", Prefs::futbol, () -> Prefs.setFutbol(!Prefs.futbol())));
             home.add(toggle("Continuar viendo", "play", Prefs::watchNext, () -> Prefs.setWatchNext(!Prefs.watchNext())));
             home.add(toggle("Sonidos al navegar", "speaker", Prefs::sounds, () -> Prefs.setSounds(!Prefs.sounds())));
-            home.add(link("Idioma", "settings", "", "language"));
-            home.add(link("Ciudad", "home", Prefs.city(), "city"));
-            home.add(link("Club y selección", "sparkles", "", "club"));
+            final String[] langs = SettingsActivity.SettingsView.languageChoices();
+            home.add(cycle("Idioma", "settings", () -> Prefs.language().equals("auto") ? "Automático" : Ui.languageName(Prefs.language()),
+                    d -> Prefs.setLanguage(langs[(at(langs, Prefs.language()) + d + langs.length) % langs.length])));
+            final Tile city = new Tile("Ciudad", "home", null);
+            city.sub = Prefs.city().isEmpty() ? "Elegí tu ciudad" : Prefs.city();
+            city.stay = () -> askCity(city);
+            home.add(city);
+            final String[][] clubs = SettingsActivity.SettingsView.CLUBS, nations = SettingsActivity.SettingsView.NATIONS;
+            home.add(cycle("Club favorito", "sparkles", () -> clubs[SettingsActivity.SettingsView.indexOf(clubs, Prefs.club())][1],
+                    d -> Prefs.setClub(clubs[(SettingsActivity.SettingsView.indexOf(clubs, Prefs.club()) + d + clubs.length) % clubs.length][0])));
+            home.add(cycle("Selección", "sparkles", () -> nations[SettingsActivity.SettingsView.indexOf(nations, Prefs.nation())][1],
+                    d -> Prefs.setNation(nations[(SettingsActivity.SettingsView.indexOf(nations, Prefs.nation()) + d + nations.length) % nations.length][0])));
 
             // Fondos: what's behind the home screen and the screensaver.
             final String[] kinds = {"black", Gallery.BING, Gallery.LANDSCAPES, Gallery.ART, Gallery.ABSTRACT, Gallery.ANIMALS, Gallery.FAVORITES};
@@ -296,20 +328,138 @@ public class QuickSettingsActivity extends Activity {
                 String k = Prefs.screensaver(c);
                 return k.equals("clock") ? "Reloj" : Gallery.name(k);
             }, d -> Prefs.setScreensaver(c, savers[(at(savers, Prefs.screensaver(c)) + d + savers.length) % savers.length])));
-            bg.add(link("Más opciones de fondos", "sparkles", "Tema de temporada, favoritas, orden", "backgrounds"));
+            bg.add(toggle("Usar galería de favoritos", "sparkles", () -> Prefs.homeBackground(c).equals(Gallery.FAVORITES), () -> {
+                String now = Prefs.homeBackground(c);
+                if (now.equals(Gallery.FAVORITES)) Prefs.setHomeBackground(c, Prefs.homeBackgroundBefore(c));
+                else if (!Gallery.favorites(c).isEmpty()) {
+                    Prefs.setHomeBackgroundBefore(c, now);
+                    Prefs.setHomeBackground(c, Gallery.FAVORITES);
+                }
+            }));
+            bg.add(toggle("Fotos al azar", "sync", () -> Prefs.homeBackgroundRandom(c), () -> Prefs.setHomeBackgroundRandom(c, !Prefs.homeBackgroundRandom(c))));
+            final String[] themesS = SettingsActivity.SettingsView.THEME_CHOICES;
+            bg.add(cycle("Tema de temporada", "sparkles", () -> Gallery.photos(Prefs.seasonalTheme(c)) ? Gallery.name(Prefs.seasonalTheme(c)) : "Desactivado",
+                    d -> Prefs.setSeasonalTheme(c, themesS[(at(themesS, Prefs.seasonalTheme(c)) + d + themesS.length) % themesS.length])));
 
             // Más: the TV's own settings and the rest.
             List<Tile> more = section("Más", "settings");
             Tile tv = new Tile("Ajustes de la TV", "tv_settings", () -> open(new Intent(Settings.ACTION_SETTINGS)));
             tv.sub = "Imagen, sonido, red, apps";
             more.add(tv);
-            more.add(link("Estante", "apps", "Qué apps van en la barra", "shelf"));
-            more.add(link("Botones del control", "gamepad", "Qué abre cada botón", "keys"));
-            more.add(link("Pantalla de inicio", "home", "Free My TV u Original", "mode"));
+            Tile shelfT = new Tile("Estante", "apps", null);
+            shelfT.sub = "Qué apps van en la barra y en qué orden";
+            shelfT.stay = this::openShelf;
+            more.add(shelfT);
+            if (RemoteKeys.supported()) more.add(link("Botones del control", "gamepad", "Qué abre cada botón", "keys"));
+            final Tile mode = new Tile("Pantalla de inicio", "home", null);
+            final long[] armed = {0};
+            mode.value = () -> HomeMode.FREE.equals(HomeMode.state(c).optString("mode")) ? "Free My TV" : "Original";
+            mode.stay = () -> {   // a big change: OK twice (the first only asks)
+                boolean free = HomeMode.FREE.equals(HomeMode.state(c).optString("mode"));
+                long now = android.os.SystemClock.uptimeMillis();
+                if (now - armed[0] > 4000) {
+                    armed[0] = now;
+                    mode.sub = "OK otra vez para pasar a " + (free ? "Original" : "Free My TV");
+                } else {
+                    armed[0] = 0;
+                    HomeMode.request(c, free ? HomeMode.ORIGINAL : HomeMode.FREE);
+                    mode.sub = "Cambiando…";
+                }
+                invalidate();
+            };
+            more.add(mode);
             String services = Settings.Secure.getString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
             if (services != null && services.contains(c.getPackageName() + "/")) {
                 more.add(toggle("Recibir videos (DLNA)", "play", () -> Dlna.enabled(c), () -> Dlna.setEnabled(c, !Dlna.enabled(c))));
             }
+        }
+
+        /** The city: a small box to type it in (over the panel), then the matches listed in the panel. */
+        private void askCity(final Tile cityTile) {
+            final Context c = getContext();
+            final android.widget.EditText field = new android.widget.EditText(QuickSettingsActivity.this);
+            field.setSingleLine(true);
+            field.setHint("Escribí el nombre de tu ciudad");
+            field.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);
+            final android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(QuickSettingsActivity.this,
+                    android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    .setTitle("Ciudad").setView(field)
+                    .setPositiveButton("Buscar", (d, w) -> searchCity(field.getText().toString(), cityTile))
+                    .setNegativeButton("Cancelar", null).create();
+            field.setOnEditorActionListener((v, a, ev) -> {
+                dialog.dismiss();
+                searchCity(field.getText().toString(), cityTile);
+                return true;
+            });
+            dialog.show();
+        }
+
+        private void searchCity(final String name, final Tile cityTile) {
+            if (name.trim().isEmpty()) return;
+            cityTile.sub = "Buscando…";
+            invalidate();
+            new Thread(() -> {
+                List<String[]> found;
+                try {
+                    found = HomeData.findCity(name);
+                } catch (Exception e) {
+                    found = new ArrayList<>();
+                    AppLog.w("city search: " + e.getMessage());
+                }
+                final List<String[]> result = found;
+                post(() -> {
+                    cityTile.sub = result.isEmpty() ? "No encontré esa ciudad" : Prefs.city();
+                    if (result.isEmpty()) {
+                        invalidate();
+                        return;
+                    }
+                    List<Tile> list = new ArrayList<>();
+                    for (final String[] ct : result) {
+                        Tile t = new Tile(ct[0], "home", null);
+                        t.stay = () -> {
+                            Prefs.setCity(ct[1], ct[2], ct[3]);
+                            HomeData.get(getContext()).settingsChanged();
+                            cityTile.sub = Prefs.city();
+                            closeSub();
+                        };
+                        list.add(t);
+                    }
+                    openSub("Elegí tu ciudad", list);
+                });
+            }).start();
+        }
+
+        /** The shelf: every app; OK puts it on the bar (or takes it off), ← → moves it earlier or later. */
+        private void openShelf() {
+            final Context c = getContext();
+            final List<String> order = new ArrayList<>();
+            PackageManager pm = c.getPackageManager();
+            for (String pkg : HomeApps.shelfPackages(c)) if (HomeApps.launchIntent(pm, pkg) != null) order.add(pkg);
+            List<Tile> list = new ArrayList<>();
+            for (final String[] app : HomeApps.shelfCandidates(c)) {
+                final Tile t = new Tile(app[1], "apps", null);
+                t.on = () -> order.contains(app[0]);
+                t.stay = () -> {
+                    if (order.contains(app[0])) order.remove(app[0]);
+                    else if (order.size() < HomeApps.MAX_SHELF) order.add(app[0]);
+                    Prefs.setShelf(order);
+                    invalidate();
+                };
+                t.cycle = d -> {   // ← → : one place earlier or later on the bar
+                    int at = order.indexOf(app[0]), to = at + d;
+                    if (at < 0 || to < 0 || to >= order.size()) return;
+                    order.remove(at);
+                    order.add(to, app[0]);
+                    Prefs.setShelf(order);
+                    invalidate();
+                };
+                t.value = () -> {
+                    int at = order.indexOf(app[0]);
+                    return at < 0 ? "" : "Lugar " + (at + 1);
+                };
+                list.add(t);
+            }
+            openSub("Estante", list);
         }
 
         private void arrangeTiles() {
@@ -416,14 +566,15 @@ public class QuickSettingsActivity extends Activity {
             }
             switch (e.getKeyCode()) {
                 case KeyEvent.KEYCODE_BACK:
-                    if (side == 1) side = 0;   // back to the rail
+                    if (subList != null) closeSub();   // back to the section
+                    else if (side == 1) side = 0;      // back to the rail
                     else close();
                     break;
                 case KeyEvent.KEYCODE_DPAD_UP:
                 case KeyEvent.KEYCODE_DPAD_DOWN: {
                     int d = e.getKeyCode() == KeyEvent.KEYCODE_DPAD_DOWN ? 1 : -1;
                     if (side == 0) sect = Math.max(0, Math.min(sectNames.size() - 1, sect + d));
-                    else focus = Math.max(0, Math.min(sectTiles.get(sect).size() - 1, focus + d));
+                    else focus = Math.max(0, Math.min(rows().size() - 1, focus + d));
                     break;
                 }
                 case KeyEvent.KEYCODE_DPAD_LEFT:
@@ -439,6 +590,7 @@ public class QuickSettingsActivity extends Activity {
                     Tile cur = curTile();
                     if (cur.wide) cur.adjust.accept(d);        // a slider moves
                     else if (cur.cycle != null) cur.cycle.accept(d);   // a value steps
+                    else if (d < 0 && subList != null) closeSub();
                     else if (d < 0) side = 0;                   // ← back to the rail
                     break;
                 }
@@ -607,8 +759,8 @@ public class QuickSettingsActivity extends Activity {
             // The section: its name, then its rows (scrolled so the focused one shows).
             float cx = x0 + 186 * k, cr = x0 + pw - 34 * k;
             if (sectNames.isEmpty()) return;
-            c.drawText(sectNames.get(sect), cx + 6 * k, 100 * k, colTitle);
-            List<Tile> l = sectTiles.get(sect);
+            c.drawText(subList != null ? subTitle : sectNames.get(sect), cx + 6 * k, 100 * k, colTitle);
+            List<Tile> l = rows();
             float top = 136 * k, bottom = h - 34 * k, y = top, scroll = 0;
             for (int i = 0; i < l.size(); i++) {
                 float hh = (l.get(i).wide ? 70 : 84) * k;
@@ -632,16 +784,19 @@ public class QuickSettingsActivity extends Activity {
                     title.setColor(on ? 0xFF1C1C1E : 0xFFFFFFFF);
                     sub.setColor(on ? 0x991C1C1E : 0x99FFFFFF);
                     float tx = r.left + 76 * k;
-                    String val = t.value != null ? "‹  " + t.value.get() + "  ›" : "";
+                    String vv = t.value != null ? t.value.get() : "";
+                    String val = vv.isEmpty() ? "" : t.cycle != null && t.on == null ? "‹  " + vv + "  ›" : vv;
                     valuePaint.setColor(on ? 0xB31C1C1E : 0xCCFFFFFF);
-                    float rightRoom = t.on != null ? 100 * k : !val.isEmpty() ? valuePaint.measureText(val) + 40 * k
+                    float rightRoom = t.on != null ? (val.isEmpty() ? 100 * k : 200 * k) : !val.isEmpty() ? valuePaint.measureText(val) + 40 * k
                             : t.action != null ? 50 * k : 24 * k;
                     float room = r.right - tx - rightRoom;
                     boolean two = t.sub != null && !t.sub.isEmpty();
                     c.drawText(fit(t.title, title, room), tx, two ? r.centerY() - 4 * k : r.centerY() + Ui.halfCap(title), title);
                     if (two) c.drawText(fit(t.sub, sub, room), tx, r.centerY() + 24 * k, sub);
-                    if (t.on != null) drawSwitch(c, r.right - 26 * k, r.centerY(), t.on.getAsBoolean(), on);
-                    else if (!val.isEmpty()) c.drawText(val, r.right - 26 * k, r.centerY() + Ui.halfCap(valuePaint), valuePaint);
+                    if (t.on != null) {
+                        drawSwitch(c, r.right - 26 * k, r.centerY(), t.on.getAsBoolean(), on);
+                        if (!val.isEmpty()) c.drawText(val, r.right - 110 * k, r.centerY() + Ui.halfCap(valuePaint), valuePaint);
+                    } else if (!val.isEmpty()) c.drawText(val, r.right - 26 * k, r.centerY() + Ui.halfCap(valuePaint), valuePaint);
                     else if (t.action != null) c.drawText("›", r.right - 26 * k, r.centerY() + Ui.halfCap(valuePaint), valuePaint);
                 }
                 y += hh + 12 * k;
