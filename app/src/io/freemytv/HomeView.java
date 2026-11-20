@@ -6969,7 +6969,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         updateCtrlKinds(np);
         int n = ctrlKinds.length;
         float step = 70 * k, side = 92 * k, cy = B - 58 * k, mid = (a0 + a1) / 2;
-        float ph = 64 * k, pw = 2 * step + 64 * k;
+        float ph = 64 * k, pw = 3 * step + 64 * k;   // four in the pill: previous, play, next, stop
         tmp.set(mid - pw / 2, cy - ph / 2, mid + pw / 2, cy + ph / 2);
         fill.setColor(Ui.alpha(0x26FFFFFF, te));
         c.drawRoundRect(tmp, ph / 2, ph / 2, fill);
@@ -6985,10 +6985,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             float cx;
             switch (kind) {
                 case C_SHUFFLE: cx = mid - pw / 2 - side / 2 - 6 * k; break;
-                case C_PREV: cx = mid - step; break;
-                case C_NEXT: cx = mid + step; break;
+                case C_PREV: cx = mid - 1.5f * step; break;
+                case C_NEXT: cx = mid + 0.5f * step; break;
+                case C_STOP: cx = mid + 1.5f * step; break;
                 case C_REPEAT: cx = mid + pw / 2 + side / 2 + 6 * k; break;
-                default: cx = mid;
+                default: cx = mid - 0.5f * step;   // play
             }
             float cf = Ui.clamp(ctrlFocus[i].value), rr = (kind == C_PLAY ? 27 : 24) * k * (1 + 0.1f * cf);
             if (cf > 0.01f) {
@@ -7166,8 +7167,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     }
 
     private void updateCtrlKinds(NowPlaying np) {
-        // Glass edition: no stop button (shuffle and repeat flank the pill instead).
-        int n = 3 + (np.canShuffle() ? 1 : 0) + (np.canRepeat() ? 1 : 0);
+        // Glass edition: previous, play, next and stop (to stop listening), shuffle and repeat on the sides.
+        int n = 4 + (np.canShuffle() ? 1 : 0) + (np.canRepeat() ? 1 : 0);
         if (n == ctrlKinds.length) return;
         int[] k2 = new int[n];
         int i = 0;
@@ -7175,6 +7176,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         k2[i++] = C_PREV;
         k2[i++] = C_PLAY;
         k2[i++] = C_NEXT;
+        k2[i++] = C_STOP;
         if (np.canRepeat()) k2[i] = C_REPEAT;
         ctrlKinds = k2;
         ctrlIndex = Math.min(ctrlIndex, n - 1);
