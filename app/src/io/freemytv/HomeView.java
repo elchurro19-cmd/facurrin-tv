@@ -124,7 +124,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     /** The heart (saves the background on screen) and "Mis fondos" (the saved ones, to pick one). */
     private static final int HEART_KIND = 32, FAVS_KIND = 33;
     private static final int Z_FAVS = 17;
-    private boolean heartOn;
+    private boolean heartOn, heartSub, favOn;
+    private int favRow;   // in the card: 0 the switch (top right), 1 the pictures
+    private final RectF favSwitch = new RectF();
+    private TextPaint favSwitchText;
+    private static final float FAVS_TOP = 812;   // under the heart's second button
     private int favCount, favIndex;
     private List<Gallery.Item> favs = new ArrayList<>();
     private final java.util.Map<String, Bitmap> favThumbs = new java.util.HashMap<>();
@@ -2883,7 +2887,6 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             else list.add(it);
         }
         if (!HomeApps.allInputs(c).isEmpty()) list.add(HomeApps.action(HomeApps.INPUTS, "inputs", "Entradas", "hdmi"));
-        list.add(HomeApps.action(FAVS_KIND, "favs", "Mis fondos", "sparkles"));
         if (browser != null) list.add(browser);
         list.add(HomeApps.action(HEART_KIND, "heart", "Guardar fondo", "sparkles"));
         // Two circles at the end: the team (its crest only) and the weather (OK opens its panel).
@@ -2986,6 +2989,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     }
 
     private void closeDrawer() {
+        heartSub = false;
         if (drawerPanel == 1) unfoldInputs(false);
         drawerPanel = 0;
         drawerOpen = false;
@@ -3190,6 +3194,81 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
     }
 
+    /**
+     * The heart: focused, it grows down into a pill (like the search with its microphone) with a second button, the
+     * saved backgrounds. OK on the heart saves the background on screen; ↓ and OK opens "Mis fondos".
+     */
+    private void drawHeartButton(Canvas c, int i) {
+        RectF base = drawerRects[i];
+        float f = Ui.clamp(drawerFocus[i].value), open = Math.max(f, heartSub ? 1 : 0);
+        float d = base.height(), cx = base.centerX(), top = base.top, sub = 12 * k + d;
+        cell.set(base.left, top, base.right, base.bottom + sub * open);
+        float r = d / 2;
+        if (open > 0.01f) {
+            tmp.set(cell);
+            tmp.offset(0, 10 * k);
+            shadow.setColor(Ui.alpha(0xFF000000, 0.4f * open));
+            shadows.draw(c, tmp, r, SHADOW_BLUR * k, shadow);
+        }
+        drawerGlass(c, cell, r, 0.7f, 0x14000000, 6 * k);
+        boolean onHeart = zone == Z_DRAWER && drawerIndex == i && !heartSub;
+        boolean onSub = zone == Z_DRAWER && drawerIndex == i && heartSub;
+        float hy = base.centerY(), sy = base.centerY() + sub;
+        if (onHeart) {
+            fill.setShader(null);
+            fill.setColor(WHITE);
+            c.drawCircle(cx, hy, r - 4 * k, fill);
+        }
+        drawHeart(c, cx, hy + 2 * k, 21 * k, onHeart ? INK : tone(L_INK, 0xF2FFFFFF), heartOn);
+        if (open > 0.01f) {
+            if (onSub) {
+                fill.setShader(null);
+                fill.setColor(Ui.alpha(WHITE, open));
+                c.drawCircle(cx, sy, r - 4 * k, fill);
+            }
+            int ink = Ui.alpha(onSub ? INK : tone(L_INK, 0xF2FFFFFF), open);
+            // A little framed picture: the saved backgrounds.
+            float pw = 40 * k, ph = 30 * k;
+            if (heartStroke == null) {
+                heartStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+                heartStroke.setStyle(Paint.Style.STROKE);
+                heartStroke.setStrokeJoin(Paint.Join.ROUND);
+            }
+            heartStroke.setStrokeWidth(3.2f * k);
+            heartStroke.setColor(ink);
+            tmp.set(cx - pw / 2, sy - ph / 2, cx + pw / 2, sy + ph / 2);
+            c.drawRoundRect(tmp, 5 * k, 5 * k, heartStroke);
+            heartPath.reset();
+            heartPath.moveTo(tmp.left + 5 * k, tmp.bottom - 5 * k);
+            heartPath.lineTo(cx - 4 * k, sy - 2 * k);
+            heartPath.lineTo(cx + 3 * k, sy + 5 * k);
+            heartPath.lineTo(cx + 8 * k, sy);
+            heartPath.lineTo(tmp.right - 5 * k, tmp.bottom - 5 * k);
+            c.drawPath(heartPath, heartStroke);
+        }
+        if (onHeart || onSub) {
+            focusRing.setStrokeWidth(4 * k);
+            focusRing.setColor(0xF2FFFFFF);
+            float o = 5 * k;
+            c.drawRoundRect(cell.left - o, cell.top - o, cell.right + o, cell.bottom + o, r + o, r + o, focusRing);
+        }
+    }
+
+    /** "Usar galería de favoritos": Home shows the saved ones; off, what it showed before (Bing's, say). */
+    private void setFavoritesOn(boolean on) {
+        Context ctx = getContext().getApplicationContext();
+        String now = Prefs.homeBackground(ctx);
+        if (on && !now.equals(Gallery.FAVORITES)) {
+            Prefs.setHomeBackgroundBefore(ctx, now);
+            Prefs.setHomeBackground(ctx, Gallery.FAVORITES);
+        } else if (!on && now.equals(Gallery.FAVORITES)) {
+            Prefs.setHomeBackground(ctx, Prefs.homeBackgroundBefore(ctx));
+        }
+        favOn = on;
+        updateWallpaper();
+        drawerDirty = true;
+    }
+
     /** A heart, `r` about half its width, filled or as an outline. */
     private void drawHeart(Canvas c, float cx, float cy, float r, int color, boolean filled) {
         heartPath.reset();
@@ -3219,10 +3298,12 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         LOADER.execute(() -> {
             Gallery.Item cur = wallpaperWanted ? Gallery.current(ctx) : null;
             boolean on = cur != null && Gallery.isFavorite(ctx, cur.url);
+            boolean using = Prefs.homeBackground(ctx).equals(Gallery.FAVORITES);
             List<Gallery.Item> list = new ArrayList<>();
             for (Gallery.Item it : Gallery.favorites(ctx)) if (!it.paused) list.add(it);
             handler.post(() -> {
                 heartOn = on;
+                favOn = using;
                 favs = list;
                 favCount = list.size();
                 favIndex = Math.min(favIndex, Math.max(0, list.size() - 1));
@@ -3253,7 +3334,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     /** "Mis fondos": the saved backgrounds in a row under the buttons; OK puts the focused one on Home. */
     private void drawFavsCard(Canvas c) {
-        favsCard.set(MARGIN * k, CARDS_TOP * k, CONTENT_R * k, (CARDS_TOP + CARDS_H) * k);
+        favsCard.set(MARGIN * k, FAVS_TOP * k, CONTENT_R * k, (FAVS_TOP + CARDS_H) * k);
         drawerCard(c, favsCard);
         if (favHead == null) {
             favHead = new TextPaint(Ui.text(Ui.semibold, 21 * k, 0xD9FFFFFF));
@@ -3263,7 +3344,27 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         favHead.setColor(tone(L_DIM, 0xD9FFFFFF));
         favEmpty.setColor(drawerInk(0.85f));
         float x0 = favsCard.left + 36 * k, top = favsCard.top + 70 * k;
-        c.drawText(zone == Z_FAVS ? "MIS FONDOS  ·  OK LO PONE DE FONDO" : "MIS FONDOS  ·  ↓ PARA ELEGIR", x0, favsCard.top + 46 * k, favHead);
+        c.drawText(zone == Z_FAVS && favRow == 1 ? "MIS FONDOS  ·  OK LO PONE DE FONDO" : "MIS FONDOS", x0, favsCard.top + 46 * k, favHead);
+        // Top right: the switch, "Usar galería de favoritos".
+        if (favSwitchText == null) favSwitchText = new TextPaint(Ui.text(Ui.semibold, 22 * k, 0xFFFFFFFF));
+        boolean sf = zone == Z_FAVS && favRow == 0;
+        float swW = 64 * k, swH = 34 * k, sR = favsCard.right - 32 * k, sCy = favsCard.top + 38 * k;
+        String lbl = "Usar galería de favoritos";
+        float lw = favSwitchText.measureText(lbl);
+        favSwitch.set(sR - swW - 18 * k - lw - 22 * k, sCy - 26 * k, sR + 10 * k, sCy + 26 * k);
+        if (sf) {
+            fill.setShader(null);
+            fill.setColor(WHITE);
+            c.drawRoundRect(favSwitch, 26 * k, 26 * k, fill);
+        }
+        favSwitchText.setColor(sf ? INK : drawerInk(0.95f));
+        c.drawText(lbl, favSwitch.left + 22 * k, sCy + Ui.halfCap(favSwitchText), favSwitchText);
+        tmp.set(sR - swW, sCy - swH / 2, sR, sCy + swH / 2);
+        fill.setShader(null);
+        fill.setColor(favOn ? 0xFF34C759 : (sf ? 0x33000000 : 0x47FFFFFF));
+        c.drawRoundRect(tmp, swH / 2, swH / 2, fill);
+        fill.setColor(0xFFFFFFFF);
+        c.drawCircle(favOn ? tmp.right - swH / 2 : tmp.left + swH / 2, sCy, swH / 2 - 4 * k, fill);
         if (favs.isEmpty()) {
             c.drawText("Todavía no guardaste fondos: tocá el corazón para guardar el que estás viendo.", x0,
                     favsCard.centerY() + 20 * k, favEmpty);
@@ -3271,12 +3372,12 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
         float th = favsCard.bottom - 30 * k - top, tw = th * 16 / 9, gap = 22 * k;
         int perView = Math.max(1, (int) ((favsCard.width() - 72 * k + gap) / (tw + gap)));
-        int first = zone == Z_FAVS ? Math.max(0, Math.min(favIndex - perView / 2, favs.size() - perView)) : 0;
+        int first = zone == Z_FAVS && favRow == 1 ? Math.max(0, Math.min(favIndex - perView / 2, favs.size() - perView)) : 0;
         c.save();
         c.clipRect(favsCard.left + 20 * k, favsCard.top, favsCard.right - 20 * k, favsCard.bottom);
         for (int i = Math.max(0, first); i < favs.size() && i < first + perView + 1; i++) {
             float x = x0 + (i - first) * (tw + gap);
-            boolean f = zone == Z_FAVS && i == favIndex;
+            boolean f = zone == Z_FAVS && favRow == 1 && i == favIndex;
             float g = f ? 8 * k : 0;
             cell.set(x - g, top - g, x + tw + g, top + th + g);
             Bitmap b = favThumbs.get(favs.get(i).url);
@@ -3298,6 +3399,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     /** D2: a wide drawer button: its symbol (the team's crest) on the left, the name and a line under it. */
     private void drawDrawerButton(Canvas c, int i) {
         HomeApps.Item it = drawerItems.get(i);
+        if (it.kind == HEART_KIND) {
+            drawHeartButton(c, i);
+            return;
+        }
         float f = Ui.clamp(drawerFocus[i].value), s = 1 + 0.04f * f;
         RectF base = drawerRects[i];
         float cx = base.centerX(), cy = base.centerY();
@@ -4124,12 +4229,18 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 break;
             }
             case Z_FAVS:
-                if (dx != 0) {
+                if (favRow == 1 && dx != 0) {
                     int next = Math.max(0, Math.min(favs.size() - 1, favIndex + dx));
                     if (next == favIndex) return;
                     favIndex = next;
                 } else if (dy < 0) {
-                    zone = Z_DRAWER;
+                    if (favRow == 1) favRow = 0;   // up to the switch
+                    else {
+                        zone = Z_DRAWER;   // back to the heart's second button
+                        heartSub = true;
+                    }
+                } else if (dy > 0 && favRow == 0 && !favs.isEmpty()) {
+                    favRow = 1;
                 } else {
                     return;
                 }
@@ -4148,14 +4259,24 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 break;
             }
             default:
+                boolean onHeartBtn = drawerIndex < drawerItems.size() && drawerItems.get(drawerIndex).kind == HEART_KIND;
                 if (dx != 0) {
+                    heartSub = false;
                     int next = Math.max(0, Math.min(drawerItems.size() - 1, drawerIndex + dx));
                     if (next == drawerIndex) return;
                     drawerIndex = next;
+                } else if (dy < 0 && heartSub) {
+                    heartSub = false;   // back up to the heart
+                    drawerDirty = true;
                 } else if (dy < 0) {
                     closeDrawer();
-                } else if (drawerPanel == 5 && !favs.isEmpty() && !talkBack()) {
-                    zone = Z_FAVS;   // down onto the saved backgrounds
+                } else if (onHeartBtn && !heartSub) {
+                    heartSub = true;   // down to "Mis fondos", under the heart
+                    drawerDirty = true;
+                } else if (onHeartBtn && drawerPanel == 5 && !talkBack()) {
+                    zone = Z_FAVS;   // down into the card: the switch first
+                    favRow = 0;
+                    heartSub = false;
                     drawerDirty = true;
                 } else if (false) {   // the team's card has nothing to move to
                 } else if (talkBack() && !widgets().isEmpty()) {
@@ -4206,9 +4327,24 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     private void activate() {
         wake();
-        if (zone == Z_FAVS) {   // a saved background: on Home now
+        if (zone == Z_FAVS && favRow == 0) {   // the switch
+            click.open();
+            if (!favOn && favs.isEmpty()) {
+                showToast("Guardá algún fondo con el corazón primero");
+                return;
+            }
+            setFavoritesOn(!favOn);
+            showToast(favOn ? "Usando tus fondos favoritos" : "Volviendo a los fondos de antes");
+            return;
+        }
+        if (zone == Z_FAVS) {   // a saved background: on Home now (the switch turns on with it)
             if (favIndex >= favs.size()) return;
             click.open();
+            if (!favOn) {
+                Context bc = getContext().getApplicationContext();
+                Prefs.setHomeBackgroundBefore(bc, Prefs.homeBackground(bc));
+                favOn = true;
+            }
             final String url = favs.get(favIndex).url;
             final Context fc = getContext().getApplicationContext();
             LOADER.execute(() -> {
@@ -4271,6 +4407,13 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 click.open();
                 unfoldInputs(true);
                 retarget(false);
+                return;
+            }
+            if (it.kind == HEART_KIND && heartSub) {   // "Mis fondos" opens (or closes) under the buttons
+                click.open();
+                drawerPanel = drawerPanel == 5 ? 0 : 5;
+                if (drawerPanel == 5) refreshFavs(true);
+                drawerDirty = true;
                 return;
             }
             if (it.kind == HEART_KIND) {   // saves (or un-saves) the background on screen

@@ -98,6 +98,16 @@ final class Prefs {
         return v.equals("modern") ? Gallery.ART : v;   // modern art was an option for a while
     }
 
+    /** What Home showed before "Usar galería de favoritos" was turned on (it comes back when it's turned off). */
+    static String homeBackgroundBefore(Context c) {
+        String v = readString(c, "home-background-before.txt", Gallery.BING);
+        return v.equals(Gallery.FAVORITES) ? Gallery.BING : v;
+    }
+
+    static void setHomeBackgroundBefore(Context c, String v) {
+        writeString(c, "home-background-before.txt", v);
+    }
+
     static void setHomeBackground(Context c, String v) {
         writeString(c, "home-background.txt", v);
     }
