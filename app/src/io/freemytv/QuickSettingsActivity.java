@@ -348,21 +348,34 @@ public class QuickSettingsActivity extends Activity {
             final String[] clubNames = new String[clubs.length], nationNames = new String[nations.length];
             for (int i = 0; i < clubs.length; i++) clubNames[i] = clubs[i][1];
             for (int i = 0; i < nations.length; i++) nationNames[i] = nations[i][1];
-            home.add(picker("Club favorito", "ball", clubNames, () -> SettingsActivity.SettingsView.indexOf(clubs, Prefs.club()),
-                    i -> Prefs.setClub(clubs[i][0])));
-            home.add(picker("Selección", "ball", nationNames, () -> SettingsActivity.SettingsView.indexOf(nations, Prefs.nation()),
-                    i -> Prefs.setNation(nations[i][0])));
+            final Tile clubT = new Tile("Club favorito", "ball", null);
+            clubT.opens = true;
+            clubT.value = () -> !Prefs.clubName().isEmpty() ? Prefs.clubName() : clubNames[SettingsActivity.SettingsView.indexOf(clubs, Prefs.club())];
+            clubT.stay = () -> askText("Club favorito", "Escribí el nombre del club y apretá Buscar", text -> searchTeam(text, false));
+            home.add(clubT);
+            final Tile nationT = new Tile("Selección", "ball", null);
+            nationT.opens = true;
+            nationT.value = () -> !Prefs.nationName().isEmpty() ? Prefs.nationName() : nationNames[SettingsActivity.SettingsView.indexOf(nations, Prefs.nation())];
+            nationT.stay = () -> askText("Selección", "Escribí el país y apretá Buscar", text -> searchTeam(text, true));
+            home.add(nationT);
 
             // Fondos: what's behind the home screen and the screensaver.
-            final String[] kinds = {"black", Gallery.BING, Gallery.LANDSCAPES, Gallery.ART, Gallery.ABSTRACT, Gallery.ANIMALS, Gallery.FAVORITES};
-            final String[] savers = {Gallery.BING, Gallery.LANDSCAPES, Gallery.ART, Gallery.ABSTRACT, Gallery.ANIMALS, Gallery.FAVORITES, "clock"};
+            final String[] bk = Gallery.bingKinds();
+            final String[] kinds = new String[bk.length + 2], savers = new String[bk.length + 2];
+            kinds[0] = "black";
+            System.arraycopy(bk, 0, kinds, 1, bk.length);
+            kinds[kinds.length - 1] = Gallery.FAVORITES;
+            System.arraycopy(bk, 0, savers, 0, bk.length);
+            savers[bk.length] = Gallery.FAVORITES;
+            savers[bk.length + 1] = "clock";
+            final String[] kindNames = new String[kinds.length], saverNames = new String[savers.length];
+            for (int i = 0; i < kinds.length; i++) kindNames[i] = kinds[i].equals("black") ? "Negro" : Gallery.name(kinds[i]);
+            for (int i = 0; i < savers.length; i++) saverNames[i] = savers[i].equals("clock") ? "Reloj" : Gallery.name(savers[i]);
             final int[] minutes = {60, 360, 720, 1440, 10080};
             final String[] minuteNames = {"1 hora", "6 horas", "12 horas", "1 día", "1 semana"};
             List<Tile> bg = section("Fondos", "sync");
-            bg.add(cycle("Fondo del inicio", "sync", () -> {
-                String k = Prefs.homeBackground(c);
-                return k.equals("black") ? "Negro" : Gallery.name(k);
-            }, d -> Prefs.setHomeBackground(c, kinds[(at(kinds, Prefs.homeBackground(c)) + d + kinds.length) % kinds.length])));
+            bg.add(picker("Fondo del inicio", "sync", kindNames, () -> at(kinds, Prefs.homeBackground(c)),
+                    i -> Prefs.setHomeBackground(c, kinds[i])));
             bg.add(cycle("Cambiar cada", "sync", () -> {
                 int m = Prefs.homeBackgroundMinutes(c);
                 for (int i = 0; i < minutes.length; i++) if (minutes[i] == m) return minuteNames[i];
@@ -372,10 +385,8 @@ public class QuickSettingsActivity extends Activity {
                 for (int j = 0; j < minutes.length; j++) if (minutes[j] == m) i = j;
                 Prefs.setHomeBackgroundMinutes(c, minutes[(i + d + minutes.length) % minutes.length]);
             }));
-            bg.add(cycle("Protector de pantalla", "bedtime", () -> {
-                String k = Prefs.screensaver(c);
-                return k.equals("clock") ? "Reloj" : Gallery.name(k);
-            }, d -> Prefs.setScreensaver(c, savers[(at(savers, Prefs.screensaver(c)) + d + savers.length) % savers.length])));
+            bg.add(picker("Protector de pantalla", "bedtime", saverNames, () -> at(savers, Prefs.screensaver(c)),
+                    i -> Prefs.setScreensaver(c, savers[i])));
             bg.add(toggle("Usar galería de favoritos", "sparkles", () -> Prefs.homeBackground(c).equals(Gallery.FAVORITES), () -> {
                 String now = Prefs.homeBackground(c);
                 if (now.equals(Gallery.FAVORITES)) Prefs.setHomeBackground(c, Prefs.homeBackgroundBefore(c));
@@ -420,30 +431,41 @@ public class QuickSettingsActivity extends Activity {
             }
         }
 
-        /** The city: a box in the panel to type it in (the TV's keyboard comes up), then the matches listed. */
+        /** A box in the panel to type in (the TV's keyboard comes up); `then` gets the text. City, club, team. */
         boolean editing;
         private Tile editTile;
+        private java.util.function.Consumer<String> editThen;
 
         private void askCity(final Tile cityTile) {
             editTile = cityTile;
+            askText("Ciudad", "Escribí tu ciudad y apretá Buscar", text -> searchCity(text, cityTile));
+        }
+
+        private void askText(String title, String hint, java.util.function.Consumer<String> then) {
+            editThen = then;
             List<Tile> box = new ArrayList<>();
             Tile field = new Tile("", "search", null);
             field.stay = () -> { };
             box.add(field);
-            openSub("Ciudad", box);
+            openSub(title, box);
             editing = true;
             float x0 = getWidth() - 740 * k, cx = x0 + 186 * k, cr = x0 + 740 * k - 34 * k;
+            float fh = 76 * k;   // as tall as the row's inside: the letters are never cut
             android.widget.FrameLayout.LayoutParams lp = new android.widget.FrameLayout.LayoutParams(
-                    Math.round(cr - cx - 110 * k), Math.round(60 * k));
-            lp.leftMargin = Math.round(cx + 76 * k);
-            lp.topMargin = Math.round(136 * k + (84 * k - 60 * k) / 2);
+                    Math.round(cr - cx - 100 * k), Math.round(fh));
+            lp.leftMargin = Math.round(cx + 74 * k);
+            lp.topMargin = Math.round(136 * k + (84 * k - fh) / 2);
             cityField.setLayoutParams(lp);
+            cityField.setPadding(0, 0, 0, 0);
+            cityField.setIncludeFontPadding(false);
+            cityField.setGravity(android.view.Gravity.CENTER_VERTICAL | android.view.Gravity.START);
+            cityField.setHint(hint);
             cityField.setText("");
             cityField.setVisibility(View.VISIBLE);
             cityField.setOnEditorActionListener((v, act, ev) -> {
                 String text = cityField.getText().toString();
                 stopEditing();
-                searchCity(text, editTile);
+                if (editThen != null) editThen.accept(text);
                 return true;
             });
             cityField.requestFocus();
@@ -461,6 +483,58 @@ public class QuickSettingsActivity extends Activity {
             if (im != null) im.hideSoftInputFromWindow(cityField.getWindowToken(), 0);
             cityField.setVisibility(View.GONE);
             closeSub();
+        }
+
+        /** Any football team by name (ESPN's search): the matches listed; OK makes it the club (or the team). */
+        private void searchTeam(final String name, final boolean nation) {
+            if (name.trim().isEmpty()) return;
+            new Thread(() -> {
+                final List<String[]> found = new ArrayList<>();   // {id, name, league}
+                try {
+                    java.net.HttpURLConnection con = (java.net.HttpURLConnection) new java.net.URL(
+                            "https://site.web.api.espn.com/apis/common/v3/search?type=team&limit=20&query="
+                                    + java.net.URLEncoder.encode(name.trim(), "UTF-8")).openConnection();
+                    con.setConnectTimeout(8000);
+                    con.setReadTimeout(8000);
+                    StringBuilder sb = new StringBuilder();
+                    try (java.io.BufferedReader rd = new java.io.BufferedReader(new java.io.InputStreamReader(con.getInputStream(), "UTF-8"))) {
+                        for (String line; (line = rd.readLine()) != null; ) sb.append(line);
+                    }
+                    org.json.JSONArray items = new org.json.JSONObject(sb.toString()).optJSONArray("items");
+                    for (int i = 0; items != null && i < items.length(); i++) {
+                        org.json.JSONObject o = items.optJSONObject(i);
+                        if (o == null || !"soccer".equals(o.optString("sport"))) continue;
+                        found.add(new String[] {o.optString("id"), o.optString("displayName"), o.optString("league")});
+                    }
+                } catch (Exception e) {
+                    AppLog.w("team search: " + e.getMessage());
+                }
+                post(() -> {
+                    List<Tile> list = new ArrayList<>();
+                    for (final String[] tm : found) {
+                        Tile t = new Tile(tm[1], "ball", null);
+                        t.sub = tm[2].isEmpty() ? "" : tm[2].toUpperCase(java.util.Locale.ROOT);
+                        t.stay = () -> {
+                            if (nation) {
+                                Prefs.setNation(tm[0]);
+                                Prefs.setNationName(tm[1]);
+                            } else {
+                                Prefs.setClub(tm[0]);
+                                Prefs.setClubName(tm[1]);
+                            }
+                            changed();
+                            closeSub();
+                        };
+                        list.add(t);
+                    }
+                    if (list.isEmpty()) {
+                        Tile none = new Tile("No encontré ese equipo", "ball", null);
+                        none.stay = this::closeSub;
+                        list.add(none);
+                    }
+                    openSub(nation ? "Elegí la selección" : "Elegí tu club", list);
+                });
+            }).start();
         }
 
         private void searchCity(final String name, final Tile cityTile) {

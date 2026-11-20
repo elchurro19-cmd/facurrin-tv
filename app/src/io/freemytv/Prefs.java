@@ -95,6 +95,8 @@ final class Prefs {
     static String homeBackground(Context c) {
         String v = readString(c, "home-background.txt", "black");
         if (v.equals("scene")) return Gallery.BING;   // the moving scene was swapped for Bing's photos
+        if (v.equals(Gallery.LANDSCAPES) || v.equals(Gallery.ART) || v.equals(Gallery.ABSTRACT) || v.equals(Gallery.ANIMALS)
+                || v.equals("modern")) return Gallery.BING;   // Wikimedia's kinds: replaced by Bing's
         return v.equals("modern") ? Gallery.ART : v;   // modern art was an option for a while
     }
 
@@ -229,8 +231,10 @@ final class Prefs {
 
     /** The screensaver: one of Gallery.KINDS passing by, or "clock" (the big clock, no photos). */
     static String screensaver(Context c) {
-        String v = readString(c, "screensaver.txt", Gallery.LANDSCAPES);
-        return v.equals("modern") ? Gallery.ART : v;
+        String v = readString(c, "screensaver.txt", Gallery.BING);
+        if (v.equals(Gallery.LANDSCAPES) || v.equals(Gallery.ART) || v.equals(Gallery.ABSTRACT) || v.equals(Gallery.ANIMALS)
+                || v.equals("modern")) return Gallery.BING;
+        return v;
     }
 
     static void setScreensaver(Context c, String v) {
@@ -349,6 +353,11 @@ final class Prefs {
     /** Favourite club and national team, as ESPN team ids: their games come first everywhere. */
     static String club() { return sp().getString("club", "15"); }
     static void setClub(String id) { put("club", id); }
+    /** The club's and the team's names as the search found them (any club, not only the Liga's). */
+    static String clubName() { return sp().getString("club_name", ""); }
+    static void setClubName(String n) { put("club_name", n); }
+    static String nationName() { return sp().getString("nation_name", ""); }
+    static void setNationName(String n) { put("nation_name", n); }
     static String nation() { return sp().getString("nation", "202"); }
     static void setNation(String id) { put("nation", id); }
 

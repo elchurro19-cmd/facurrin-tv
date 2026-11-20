@@ -608,62 +608,6 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     /** One layer of the screen. It draws in full-screen coordinates: the glass needs each pixel's real position. */
     private SceneView sceneSkyView, sceneLandView;
 
-    // C1: the weather's symbol, moving: where the clock's layer would draw it, and how.
-    private String wxSymbol;
-    private float wxCx, wxCy, wxSize, wxShiftX, wxShiftY, wxKeep = 1;
-    private int wxInk;
-    private boolean wxShown;
-    private WxView wxView;
-
-    /** A full-screen, see-through view that only draws the weather's symbol with its little motion. */
-    private final class WxView extends View {
-        private final Paint drop = new Paint(Paint.ANTI_ALIAS_FLAG);
-
-        WxView(Context c) {
-            super(c);
-            drop.setStrokeCap(Paint.Cap.ROUND);
-        }
-
-        @Override protected void onDraw(Canvas c) {
-            if (!wxShown || wxSymbol == null || wxKeep <= 0.01f || picksOn()) return;
-            float t = SystemClock.uptimeMillis() / 1000f, cx = wxCx, cy = wxCy, s = wxSize;
-            int ink = Ui.alpha(wxInk, wxKeep);
-            String sym = wxSymbol;
-            c.save();
-            if (sym.startsWith("sunny") || sym.equals("snowflake")) {
-                c.rotate((t * 12) % 360, cx, cy);   // the sun (or the snowflake) turns slowly
-                Symbols.draw(getContext(), c, sym, cx, cy, s, ink);
-            } else if (sym.contains("cloud") || sym.equals("foggy")) {
-                c.translate((float) Math.sin(t * 0.9) * 5 * k, 0);   // the cloud drifts to and fro
-                Symbols.draw(getContext(), c, sym, cx, cy, s, ink);
-            } else if (sym.equals("rainy")) {
-                Symbols.draw(getContext(), c, sym, cx, cy - 4 * k, s, ink);
-                drop.setStrokeWidth(3 * k);
-                for (int i = 0; i < 3; i++) {   // drops falling under it
-                    float ph = (t * 1.2f + i / 3f) % 1f, dx = cx + (i - 1) * s * 0.28f, dy = cy + s * 0.32f + ph * s * 0.4f;
-                    drop.setColor(Ui.alpha(0xFF9CC9FF, (1 - ph) * wxKeep));
-                    c.drawLine(dx, dy, dx - 2 * k, dy + 8 * k, drop);
-                }
-            } else if (sym.equals("thunderstorm")) {
-                float fl = (t % 4f) < 0.12f ? 1f : 0.85f;   // now and then, a flash
-                Symbols.draw(getContext(), c, sym, cx, cy, s, Ui.alpha(wxInk, wxKeep * fl));
-            } else if (sym.endsWith("night")) {
-                Symbols.draw(getContext(), c, sym, cx, cy, s, ink);
-                for (int i = 0; i < 2; i++) {   // two stars twinkling beside the moon
-                    float a = 0.4f + 0.6f * (float) Math.abs(Math.sin(t * 1.6 + i * 1.7));
-                    drop.setColor(Ui.alpha(0xFFFFFFFF, a * wxKeep));
-                    c.drawCircle(cx + s * (0.52f + 0.12f * i), cy - s * (0.36f - 0.4f * i), (2.6f - i * 0.6f) * k, drop);
-                }
-            } else {
-                Symbols.draw(getContext(), c, sym, cx, cy, s, ink);
-            }
-            c.restore();
-            // On this TV every frame draws the whole screen again: the symbol moves for 15 s after a key (or coming back
-            // to Home), then rests (a still frame costs nothing).
-            if (running && SystemClock.uptimeMillis() - lastKeyAt < 15_000) postInvalidateDelayed(100);
-        }
-    }
-
     /** The scene's two pictures, each drawn once: the sky (moved by its translation) and the mountains with the scrims. */
     private final class SceneView extends View {
         private final boolean isSky;
@@ -788,7 +732,6 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         sceneLandView = new SceneView(a, false);
         sceneSkyView.setVisibility(GONE);
         sceneLandView.setVisibility(GONE);
-        wxView = new WxView(a);
         heroLayer = new Layer(a, HERO);
         status = new Layer(a, STATUS);
         platter = new Layer(a, PLATTER);
@@ -813,7 +756,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         dimLayer.setVisibility(GONE);
         veilLayer = new View(a);
         veilLayer.setVisibility(GONE);
-        for (View v : new View[] {sky, sceneSkyView, sceneLandView, veilLayer, heroLayer, wxView, watchLayer, status, platter, tiles, drawerLayer, sheetLayer, toastLayer, dimLayer}) {
+        for (View v : new View[] {sky, sceneSkyView, sceneLandView, veilLayer, heroLayer, watchLayer, status, platter, tiles, drawerLayer, sheetLayer, toastLayer, dimLayer}) {
             v.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);   // TalkBack reads the items (Spoken)
             addView(v);
         }
@@ -1448,7 +1391,6 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         Bitmap ss = sceneSky;   // the sky is wider than the screen: it slides
         sceneSkyView.layout(0, 0, ss == null ? width : Math.round(ss.getWidth() * height / (float) ss.getHeight()), height);
         sceneLandView.layout(0, 0, width, height);
-        wxView.layout(0, 0, width, height);
         veilLayer.layout(0, 0, width, height);
         place(heroLayer, 0, 0);
         watchLayer.layout(0, 0, width, height);
@@ -1671,7 +1613,6 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         float shift = SHIFT * k;
         float lift = -d * shift;
         show(heroLayer, top, lift);
-        if (wxView != null) show(wxView, top, lift);   // the moving weather symbol goes with the clock
         show(status, top, lift);
         show(platter, home, lift);
         show(tiles, home, lift);
@@ -4155,7 +4096,6 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     boolean onKey(KeyEvent e) {
         boolean wasIdle = idleMode();
         lastKeyAt = SystemClock.uptimeMillis();
-        if (wxView != null) wxView.invalidate();   // the weather's symbol moves again for a while
         if (wasIdle) {   // back from idle: everything moves at full speed again
             restartScene();
             restartTick();
@@ -5369,10 +5309,6 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             float up = Math.max(Ui.clamp(bubbleShow[0].value), wxOpen ? 1 : 0), keep = 1 - up;
             // Aligned with the bar of apps (Tarjetas): the block moves right to its first app's edge.
             float shift = iconDock() || platterRect.width() <= 0 ? 0 : Math.max(0, platterRect.left + SHELF_PAD * k - MARGIN * k);
-            wxShown = false;
-            wxShiftX = shift;
-            wxShiftY = -CLOCK_LIFT * k;
-            wxKeep = 1 - Math.max(Ui.clamp(bubbleShow[0].value), wxOpen ? 1 : 0);
             int moved = c.save();
             c.translate(shift, -CLOCK_LIFT * k);
             if (zone == Z_WXBTN && !wxOpen) drawWxFocus(c);
@@ -5393,7 +5329,6 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 drawWxPanel(c);
                 c.restore();
             }
-            if (wxView != null) wxView.invalidate();
             drawShelfHint(c);
             if (npWarmPending) {   // once, unseen: everything the player makes on its first open is made now
                 npWarmPending = false;
@@ -5524,13 +5459,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         float size = 60 * k;
         String symbol = Symbols.weather(wx.code, wx.isDay);
         float sw = Symbols.width(getContext(), symbol, size);
-        // C1: not drawn here; its own little view draws it moving, over this spot (heroLayer isn't redrawn for it).
-        wxSymbol = symbol;
-        wxCx = x + sw / 2 + wxShiftX;
-        wxCy = base - Ui.cap(gTemp) / 2 + wxShiftY;
-        wxSize = size;
-        wxInk = ink;
-        wxShown = true;
+        Symbols.draw(getContext(), c, symbol, x + sw / 2, base - Ui.cap(gTemp) / 2, size, ink);
         float tx = x + sw + 18 * k;
         gTemp.setColor(ink);
         c.drawText(gTempText, tx, base, gTemp);

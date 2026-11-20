@@ -31,6 +31,28 @@ final class Gallery {
     static final String LANDSCAPES = "landscapes", ART = "art", ANIMALS = "animals", ABSTRACT = "abstract", FAVORITES = "favorites";
     /** Glass edition: Bing's photos of the day (an archive kept on GitHub by npanuhin: no key), the last few years. */
     static final String BING = "bing";
+    /** Bing's photos sorted by what's in them (from their titles), and the photos of other countries' Bing. */
+    static final String[] BING_THEMES = {"bing:mountains", "bing:sea", "bing:cities", "bing:animals", "bing:night"};
+    static final String[] BING_THEME_NAMES = {"Montañas y lagos", "Playas y mar", "Ciudades", "Animales", "Noche y cielo"};
+    private static final String[] BING_THEME_WORDS = {
+        "mountain|lake|peak|alps|valley|glacier|canyon|fjord|volcano|dolomites|ridge|summit|waterfall|forest|national park",
+        "beach|coast|sea|ocean|island|bay|cliff|lagoon|reef|shore|harbor|harbour|surf|atoll",
+        "city|town|bridge|skyline|street|castle|cathedral|palace|temple|village|tower|square|church|abbey|museum",
+        "bird|bear|fox|whale|owl|penguin|lion|deer|wolf|cat|dog|turtle|elephant|zebra|giraffe|monkey|squirrel|puffin|horse|dolphin|butterfly|tiger|leopard|otter|bison|rabbit|hare|koala|panda|flamingo|eagle|seal",
+        "night|aurora|northern lights|stars|milky way|moon|eclipse|galaxy|starry|meteor"};
+    static final String[] BING_COUNTRIES = {"bing@JP/ja", "bing@BR/pt", "bing@IT/it", "bing@FR/fr", "bing@DE/de",
+            "bing@ES/es", "bing@GB/en", "bing@IN/en", "bing@CN/zh", "bing@CA/en", "bing@ROW/en"};
+    static final String[] BING_COUNTRY_NAMES = {"Japón", "Brasil", "Italia", "Francia", "Alemania", "España",
+            "Reino Unido", "India", "China", "Canadá", "Resto del mundo"};
+
+    /** Every Bing choice, in the order they're offered: no theme (all, shuffled), the themes, the countries. */
+    static String[] bingKinds() {
+        String[] out = new String[1 + BING_THEMES.length + BING_COUNTRIES.length];
+        out[0] = BING;
+        System.arraycopy(BING_THEMES, 0, out, 1, BING_THEMES.length);
+        System.arraycopy(BING_COUNTRIES, 0, out, 1 + BING_THEMES.length, BING_COUNTRIES.length);
+        return out;
+    }
     private static final String BING_ARCHIVE = "https://bing.npanuhin.me/US/en.";
 
     /** Every kind of photos, in the order they're offered. */
@@ -46,6 +68,7 @@ final class Gallery {
 
     /** A kind of photos (not "black" or "clock"), a seasonal theme included. */
     static boolean photos(String kind) {
+        if (kind.startsWith(BING)) return true;   // Bing, its themes and its countries
         for (String k : KINDS) if (k.equals(kind)) return true;
         for (String k : THEMES) if (k.equals(kind)) return true;
         return false;
@@ -53,8 +76,10 @@ final class Gallery {
 
     /** Its name in the settings and menus. */
     static String name(String kind) {
+        for (int i = 0; i < BING_THEMES.length; i++) if (BING_THEMES[i].equals(kind)) return "Bing · " + BING_THEME_NAMES[i];
+        for (int i = 0; i < BING_COUNTRIES.length; i++) if (BING_COUNTRIES[i].equals(kind)) return "Bing · " + BING_COUNTRY_NAMES[i];
         switch (kind) {
-            case BING: return "Fotos de Bing";
+            case BING: return "Bing · sin temas (al azar)";
             case ART: return "Arte";
             case ABSTRACT: return "Arte abstracto";
             case ANIMALS: return "Animales";
@@ -122,7 +147,7 @@ final class Gallery {
     /** The list (saved, or fetched when older than a week), shuffled once per fetch so every TV sees its own order. */
     static List<Item> list(Context c, String kind) {
         if (kind.equals(FAVORITES)) return shown(read(favoritesFile(c, "off")));   // the everyday ones, never a theme's
-        File f = new File(c.getFilesDir(), "gallery2-" + kind + ".json");
+        File f = new File(c.getFilesDir(), "gallery2-" + kind.replaceAll("[^a-zA-Z0-9]", "_") + ".json");
         List<Item> all = read(f), saved = suitable(all);
         if (!saved.isEmpty() && System.currentTimeMillis() - f.lastModified() < LIST_EVERY
                 && saved.size() == all.size()) {   // a list saved before the filter caught something is fetched again
@@ -131,13 +156,16 @@ final class Gallery {
         try {
             String[] theme = themeSearches(kind);
             List<Item> fresh = theme != null ? search(theme, 1.3f, 4)
-                    : kind.equals(BING) ? bing()
+                    : kind.startsWith(BING) ? bing(kind)
                     : kind.equals(ANIMALS) ? search(ANIMAL_SEARCHES, 1.3f, 4)
                     : kind.equals(ABSTRACT) ? search(ABSTRACT_SEARCHES, 1.15f, 10)   // a painting crops well enough
                     : fetch(kind.equals(ART) ? ART_CATEGORIES : LANDSCAPE_CATEGORIES, 1.3f);
             if (!fresh.isEmpty()) {
-                Collections.sort(fresh, (a, b) -> b.width - a.width);   // the sharpest originals first
-                if (fresh.size() > PER_KIND) fresh = new ArrayList<>(fresh.subList(0, PER_KIND));
+                boolean bing = kind.startsWith(BING);   // Bing's are all 1920 wide: a shuffle, and many more of them
+                if (bing) Collections.shuffle(fresh);
+                else Collections.sort(fresh, (a, b) -> b.width - a.width);   // the sharpest originals first
+                int cap = bing ? 200 : PER_KIND;
+                if (fresh.size() > cap) fresh = new ArrayList<>(fresh.subList(0, cap));
                 Collections.shuffle(fresh);
                 write(f, fresh);
                 return withLocal(c, kind, fresh);
@@ -226,13 +254,18 @@ final class Gallery {
      * Bing's photos of the day from this year and the two before (about a thousand), at 1920×1080: the place as the
      * title, the photographer as the author.
      */
-    private static List<Item> bing() throws Exception {
+    private static List<Item> bing(String kind) throws Exception {
         List<Item> out = new ArrayList<>();
+        String market = kind.contains("@") ? kind.substring(kind.indexOf('@') + 1) : "US/en";
+        java.util.regex.Pattern words = null;
+        for (int i = 0; i < BING_THEMES.length; i++) {
+            if (BING_THEMES[i].equals(kind)) words = java.util.regex.Pattern.compile("(?i)\\b(" + BING_THEME_WORDS[i] + ")(s|es)?\\b");
+        }
         int year = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR);
-        for (int y = year; y > year - 3; y--) {
+        for (int y = year; y > year - (words != null ? 6 : 3); y--) {   // a theme looks further back, to have enough
             String json;
             try {
-                json = get(BING_ARCHIVE + y + ".json");
+                json = get("https://bing.npanuhin.me/" + market + "." + y + ".json");
             } catch (IOException e) {
                 continue;   // this year's file may not be there yet
             }
@@ -245,6 +278,7 @@ final class Gallery {
                 it.url = bingUrl.contains("_UHD.jpg") ? bingUrl.replace("_UHD.jpg", "_1920x1080.jpg") : mirror;
                 if (it.url.isEmpty()) continue;
                 it.title = o.optString("title", "");
+                if (words != null && !words.matcher(it.title + " " + o.optString("subtitle", "")).find()) continue;
                 it.author = o.optString("copyright", "").replace("©", "").trim();
                 it.width = 1920;
                 out.add(it);
