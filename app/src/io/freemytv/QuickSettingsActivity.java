@@ -341,11 +341,11 @@ public class QuickSettingsActivity extends Activity {
             bg.add(cycle("Tema de temporada", "sparkles", () -> Gallery.photos(Prefs.seasonalTheme(c)) ? Gallery.name(Prefs.seasonalTheme(c)) : "Desactivado",
                     d -> Prefs.setSeasonalTheme(c, themesS[(at(themesS, Prefs.seasonalTheme(c)) + d + themesS.length) % themesS.length])));
 
-            // Más: the TV's own settings and the rest.
-            List<Tile> more = section("Más", "settings");
+            // No "Más": the TV's settings and DLNA go to Rápido, the shelf, the mode and the remote's buttons to Inicio.
+            List<Tile> more = home;
             Tile tv = new Tile("Ajustes de la TV", "tv_settings", () -> open(new Intent(Settings.ACTION_SETTINGS)));
             tv.sub = "Imagen, sonido, red, apps";
-            more.add(tv);
+            quick.add(tv);
             Tile shelfT = new Tile("Estante", "apps", null);
             shelfT.sub = "Qué apps van en la barra y en qué orden";
             shelfT.stay = this::openShelf;
@@ -370,7 +370,7 @@ public class QuickSettingsActivity extends Activity {
             more.add(mode);
             String services = Settings.Secure.getString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
             if (services != null && services.contains(c.getPackageName() + "/")) {
-                more.add(toggle("Recibir videos (DLNA)", "play", () -> Dlna.enabled(c), () -> Dlna.setEnabled(c, !Dlna.enabled(c))));
+                quick.add(toggle("Recibir videos (DLNA)", "play", () -> Dlna.enabled(c), () -> Dlna.setEnabled(c, !Dlna.enabled(c))));
             }
         }
 
@@ -731,15 +731,17 @@ public class QuickSettingsActivity extends Activity {
         private void drawColumns(Canvas c, float x0, float pw) {
             if (colTitle == null) {
                 colTitle = new TextPaint(Ui.text(Ui.displaySemibold, 36 * k, 0xFFFFFFFF));
-                railName = new TextPaint(Ui.text(Ui.medium, 17 * k, 0xFFFFFFFF));
+                railName = new TextPaint(Ui.text(Ui.medium, 20 * k, 0xFFFFFFFF));
                 railName.setTextAlign(Paint.Align.CENTER);
                 valuePaint = new TextPaint(Ui.text(Ui.regular, 21 * k, 0xCCFFFFFF));
                 valuePaint.setTextAlign(Paint.Align.RIGHT);
             }
             float h = getHeight();
-            float rl = x0 + 20 * k, rw = 124 * k;
-            for (int i = 0; i < sectNames.size(); i++) {
-                r.set(rl, (54 + i * 132) * k, rl + rw, (54 + i * 132 + 116) * k);
+            float rl = x0 + 20 * k, rw = 124 * k, ih = 150 * k, ig = 26 * k;
+            int ns = sectNames.size();
+            float rt = Math.max(54 * k, (h - (ns * ih + Math.max(0, ns - 1) * ig)) / 2);   // centred in the height
+            for (int i = 0; i < ns; i++) {
+                r.set(rl, rt + i * (ih + ig), rl + rw, rt + i * (ih + ig) + ih);
                 boolean f = side == 0 && i == sect;
                 fill.setShader(null);
                 if (f) {
@@ -750,9 +752,9 @@ public class QuickSettingsActivity extends Activity {
                     c.drawRoundRect(r, 26 * k, 26 * k, fill);
                 }
                 int ink = f ? 0xFF1C1C1E : 0xF2FFFFFF;
-                drawGlyph(c, sectIcons.get(i), r.centerX(), r.top + 46 * k, 15 * k, ink);
+                drawGlyph(c, sectIcons.get(i), r.centerX(), r.top + 58 * k, 19 * k, ink);
                 railName.setColor(ink);
-                c.drawText(sectNames.get(i), r.centerX(), r.top + 96 * k, railName);
+                c.drawText(sectNames.get(i), r.centerX(), r.top + 122 * k, railName);
             }
             fill.setColor(0x2EFFFFFF);
             c.drawRect(x0 + 160 * k, 50 * k, x0 + 162 * k, h - 50 * k, fill);
