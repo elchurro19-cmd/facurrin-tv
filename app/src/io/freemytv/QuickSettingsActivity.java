@@ -39,12 +39,28 @@ import java.util.Locale;
 public class QuickSettingsActivity extends Activity {
     private PanelView panel;
 
+    /** The city's box: a text field over the panel's own row, in its colours and letter. */
+    private android.widget.EditText cityField;
+
     @Override
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         Ui.init(this);
         panel = new PanelView(this);
-        setContentView(panel);
+        android.widget.FrameLayout root = new android.widget.FrameLayout(this);
+        root.addView(panel);
+        cityField = new android.widget.EditText(this);
+        cityField.setVisibility(View.GONE);
+        cityField.setBackground(null);
+        cityField.setSingleLine(true);
+        cityField.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);
+        cityField.setTextColor(0xFF1C1C1E);
+        cityField.setHintTextColor(0x801C1C1E);
+        cityField.setTypeface(Ui.medium);
+        cityField.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, 26 * getResources().getDisplayMetrics().heightPixels / 1080f);
+        cityField.setHint("Escribí tu ciudad y apretá Buscar");
+        root.addView(cityField, new android.widget.FrameLayout.LayoutParams(1, 1));
+        setContentView(root);
     }
 
     /** Already open (singleTask) and asked again: the gear works as a switch. */
@@ -62,6 +78,13 @@ public class QuickSettingsActivity extends Activity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
+        if (panel.editing) {   // typing the city: the keys are the field's (Back leaves it)
+            if (e.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+                if (e.getAction() == KeyEvent.ACTION_UP) panel.stopEditing();
+                return true;
+            }
+            return super.dispatchKeyEvent(e);
+        }
         return panel.key(e) || super.dispatchKeyEvent(e);
     }
 
@@ -92,6 +115,8 @@ public class QuickSettingsActivity extends Activity {
         /** U2: a value shown on the right ("‹ Oscuro ›"), stepped by ← → (and OK). */
         java.util.function.Supplier<String> value;
         java.util.function.IntConsumer cycle;
+        /** OK opens a list to pick from (the value shows with a chevron). */
+        boolean opens;
 
         Tile(String title, String symbol, Runnable action) {
             this.title = title;
@@ -200,6 +225,31 @@ public class QuickSettingsActivity extends Activity {
             return t;
         }
 
+        /** A row whose value is picked from a list shown in the panel (the current one ticked); OK picks. */
+        private Tile picker(String title, String symbol, String[] names, java.util.function.IntSupplier current,
+                java.util.function.IntConsumer pick) {
+            final Tile t = new Tile(title, symbol, null);
+            t.opens = true;
+            t.value = () -> names[Math.max(0, Math.min(names.length - 1, current.getAsInt()))];
+            t.stay = () -> {
+                List<Tile> list = new ArrayList<>();
+                for (int i = 0; i < names.length; i++) {
+                    final int idx = i;
+                    Tile o = new Tile(names[i], symbol, null);
+                    o.value = () -> current.getAsInt() == idx ? "✓" : "";
+                    o.stay = () -> {
+                        pick.accept(idx);
+                        changed();
+                        closeSub();
+                    };
+                    list.add(o);
+                }
+                openSub(title, list);
+                focus = Math.max(0, current.getAsInt());
+            };
+            return t;
+        }
+
         /** A link into the settings' longer screens (pickers, the shelf, the remote's buttons). */
         private Tile link(String title, String symbol, String sub, String what) {
             Tile t = new Tile(title, symbol, () -> open(new Intent(getContext(), SettingsActivity.class).putExtra("open", what)));
@@ -276,31 +326,32 @@ public class QuickSettingsActivity extends Activity {
             }
 
             // Inicio: the home screen's own settings (the longer ones open their screen).
-            final String[] themes = {"auto", "light", "dark"}, themeNames = {"Automático", "Claro", "Oscuro"};
             final String[] units = {"auto", "C", "F"}, unitNames = {"Automática", "°C", "°F"};
             List<Tile> home = section("Inicio", "home");
-            home.add(cycle("Tema", "clear_night", () -> themeNames[at(themes, Prefs.theme())],
-                    d -> Prefs.setTheme(themes[(at(themes, Prefs.theme()) + d + 3) % 3])));
             home.add(cycle("Temperatura", "sunny", () -> unitNames[at(units, Prefs.temperature())],
                     d -> Prefs.setTemperature(units[(at(units, Prefs.temperature()) + d + 3) % 3])));
             home.add(cycle("Estilo de la barra", "apps", () -> Prefs.shelfStyle().equals("icons") ? "Íconos" : "Tarjetas",
                     d -> Prefs.setShelfStyle(Prefs.shelfStyle().equals("icons") ? "cards" : "icons")));
             home.add(toggle("Clima", "partly_cloudy_day", Prefs::weather, () -> Prefs.setWeather(!Prefs.weather())));
-            home.add(toggle("Fútbol", "sparkles", Prefs::futbol, () -> Prefs.setFutbol(!Prefs.futbol())));
+            home.add(toggle("Fútbol", "ball", Prefs::futbol, () -> Prefs.setFutbol(!Prefs.futbol())));
             home.add(toggle("Continuar viendo", "play", Prefs::watchNext, () -> Prefs.setWatchNext(!Prefs.watchNext())));
             home.add(toggle("Sonidos al navegar", "speaker", Prefs::sounds, () -> Prefs.setSounds(!Prefs.sounds())));
             final String[] langs = SettingsActivity.SettingsView.languageChoices();
-            home.add(cycle("Idioma", "settings", () -> Prefs.language().equals("auto") ? "Automático" : Ui.languageName(Prefs.language()),
-                    d -> Prefs.setLanguage(langs[(at(langs, Prefs.language()) + d + langs.length) % langs.length])));
+            final String[] langNames = new String[langs.length];
+            for (int i = 0; i < langs.length; i++) langNames[i] = langs[i].equals("auto") ? "Automático" : Ui.languageName(langs[i]);
+            home.add(picker("Idioma", "settings", langNames, () -> at(langs, Prefs.language()), i -> Prefs.setLanguage(langs[i])));
             final Tile city = new Tile("Ciudad", "home", null);
             city.sub = Prefs.city().isEmpty() ? "Elegí tu ciudad" : Prefs.city();
             city.stay = () -> askCity(city);
             home.add(city);
             final String[][] clubs = SettingsActivity.SettingsView.CLUBS, nations = SettingsActivity.SettingsView.NATIONS;
-            home.add(cycle("Club favorito", "sparkles", () -> clubs[SettingsActivity.SettingsView.indexOf(clubs, Prefs.club())][1],
-                    d -> Prefs.setClub(clubs[(SettingsActivity.SettingsView.indexOf(clubs, Prefs.club()) + d + clubs.length) % clubs.length][0])));
-            home.add(cycle("Selección", "sparkles", () -> nations[SettingsActivity.SettingsView.indexOf(nations, Prefs.nation())][1],
-                    d -> Prefs.setNation(nations[(SettingsActivity.SettingsView.indexOf(nations, Prefs.nation()) + d + nations.length) % nations.length][0])));
+            final String[] clubNames = new String[clubs.length], nationNames = new String[nations.length];
+            for (int i = 0; i < clubs.length; i++) clubNames[i] = clubs[i][1];
+            for (int i = 0; i < nations.length; i++) nationNames[i] = nations[i][1];
+            home.add(picker("Club favorito", "ball", clubNames, () -> SettingsActivity.SettingsView.indexOf(clubs, Prefs.club()),
+                    i -> Prefs.setClub(clubs[i][0])));
+            home.add(picker("Selección", "ball", nationNames, () -> SettingsActivity.SettingsView.indexOf(nations, Prefs.nation()),
+                    i -> Prefs.setNation(nations[i][0])));
 
             // Fondos: what's behind the home screen and the screensaver.
             final String[] kinds = {"black", Gallery.BING, Gallery.LANDSCAPES, Gallery.ART, Gallery.ABSTRACT, Gallery.ANIMALS, Gallery.FAVORITES};
@@ -321,9 +372,6 @@ public class QuickSettingsActivity extends Activity {
                 for (int j = 0; j < minutes.length; j++) if (minutes[j] == m) i = j;
                 Prefs.setHomeBackgroundMinutes(c, minutes[(i + d + minutes.length) % minutes.length]);
             }));
-            Tile next = new Tile("Cambiar fondo ahora", "sync", null);
-            next.stay = () -> Prefs.skipHomeBackground(c);
-            bg.add(next);
             bg.add(cycle("Protector de pantalla", "bedtime", () -> {
                 String k = Prefs.screensaver(c);
                 return k.equals("clock") ? "Reloj" : Gallery.name(k);
@@ -337,9 +385,7 @@ public class QuickSettingsActivity extends Activity {
                 }
             }));
             bg.add(toggle("Fotos al azar", "sync", () -> Prefs.homeBackgroundRandom(c), () -> Prefs.setHomeBackgroundRandom(c, !Prefs.homeBackgroundRandom(c))));
-            final String[] themesS = SettingsActivity.SettingsView.THEME_CHOICES;
-            bg.add(cycle("Tema de temporada", "sparkles", () -> Gallery.photos(Prefs.seasonalTheme(c)) ? Gallery.name(Prefs.seasonalTheme(c)) : "Desactivado",
-                    d -> Prefs.setSeasonalTheme(c, themesS[(at(themesS, Prefs.seasonalTheme(c)) + d + themesS.length) % themesS.length])));
+
 
             // No "Más": the TV's settings and DLNA go to Rápido, the shelf, the mode and the remote's buttons to Inicio.
             List<Tile> more = home;
@@ -374,24 +420,47 @@ public class QuickSettingsActivity extends Activity {
             }
         }
 
-        /** The city: a small box to type it in (over the panel), then the matches listed in the panel. */
+        /** The city: a box in the panel to type it in (the TV's keyboard comes up), then the matches listed. */
+        boolean editing;
+        private Tile editTile;
+
         private void askCity(final Tile cityTile) {
-            final Context c = getContext();
-            final android.widget.EditText field = new android.widget.EditText(QuickSettingsActivity.this);
-            field.setSingleLine(true);
-            field.setHint("Escribí el nombre de tu ciudad");
-            field.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);
-            final android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(QuickSettingsActivity.this,
-                    android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                    .setTitle("Ciudad").setView(field)
-                    .setPositiveButton("Buscar", (d, w) -> searchCity(field.getText().toString(), cityTile))
-                    .setNegativeButton("Cancelar", null).create();
-            field.setOnEditorActionListener((v, a, ev) -> {
-                dialog.dismiss();
-                searchCity(field.getText().toString(), cityTile);
+            editTile = cityTile;
+            List<Tile> box = new ArrayList<>();
+            Tile field = new Tile("", "search", null);
+            field.stay = () -> { };
+            box.add(field);
+            openSub("Ciudad", box);
+            editing = true;
+            float x0 = getWidth() - 740 * k, cx = x0 + 186 * k, cr = x0 + 740 * k - 34 * k;
+            android.widget.FrameLayout.LayoutParams lp = new android.widget.FrameLayout.LayoutParams(
+                    Math.round(cr - cx - 110 * k), Math.round(60 * k));
+            lp.leftMargin = Math.round(cx + 76 * k);
+            lp.topMargin = Math.round(136 * k + (84 * k - 60 * k) / 2);
+            cityField.setLayoutParams(lp);
+            cityField.setText("");
+            cityField.setVisibility(View.VISIBLE);
+            cityField.setOnEditorActionListener((v, act, ev) -> {
+                String text = cityField.getText().toString();
+                stopEditing();
+                searchCity(text, editTile);
                 return true;
             });
-            dialog.show();
+            cityField.requestFocus();
+            cityField.post(() -> {
+                android.view.inputmethod.InputMethodManager im = getContext().getSystemService(android.view.inputmethod.InputMethodManager.class);
+                if (im != null) im.showSoftInput(cityField, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+            });
+            invalidate();
+        }
+
+        void stopEditing() {
+            if (!editing) return;
+            editing = false;
+            android.view.inputmethod.InputMethodManager im = getContext().getSystemService(android.view.inputmethod.InputMethodManager.class);
+            if (im != null) im.hideSoftInputFromWindow(cityField.getWindowToken(), 0);
+            cityField.setVisibility(View.GONE);
+            closeSub();
         }
 
         private void searchCity(final String name, final Tile cityTile) {
@@ -787,7 +856,7 @@ public class QuickSettingsActivity extends Activity {
                     sub.setColor(on ? 0x991C1C1E : 0x99FFFFFF);
                     float tx = r.left + 76 * k;
                     String vv = t.value != null ? t.value.get() : "";
-                    String val = vv.isEmpty() ? "" : t.cycle != null && t.on == null ? "‹  " + vv + "  ›" : vv;
+                    String val = vv.isEmpty() ? "" : t.cycle != null && t.on == null ? "‹  " + vv + "  ›" : t.opens ? vv + "   ›" : vv;
                     valuePaint.setColor(on ? 0xB31C1C1E : 0xCCFFFFFF);
                     float rightRoom = t.on != null ? (val.isEmpty() ? 100 * k : 200 * k) : !val.isEmpty() ? valuePaint.measureText(val) + 40 * k
                             : t.action != null ? 50 * k : 24 * k;
@@ -986,6 +1055,20 @@ public class QuickSettingsActivity extends Activity {
                 path.lineTo(cx + u * 0.5f, cy - u * 0.45f);
                 path.lineTo(cx - u * 0.55f, cy + u * 0.5f);
                 c.drawPath(path, glyph);
+            } else if (which.equals("ball")) {   // a football: a ring, a pentagon in the middle, its seams
+                glyph.setColor(color);
+                glyph.setStrokeWidth(2.4f * k);
+                c.drawCircle(cx, cy, u, glyph);
+                path.reset();
+                for (int i = 0; i < 5; i++) {
+                    double a = Math.toRadians(-90 + 72 * i);
+                    float px = cx + (float) Math.cos(a) * u * 0.4f, py = cy + (float) Math.sin(a) * u * 0.4f;
+                    if (i == 0) path.moveTo(px, py); else path.lineTo(px, py);
+                    c.drawLine(px, py, cx + (float) Math.cos(a) * u, cy + (float) Math.sin(a) * u, glyph);
+                }
+                path.close();
+                fill.setColor(color);
+                c.drawPath(path, fill);
             } else {
                 Symbols.draw(getContext(), c, which, cx, cy, u * 1.9f, color);
             }
