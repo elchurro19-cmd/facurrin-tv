@@ -413,7 +413,8 @@ public class QuickSettingsActivity extends Activity {
             if (RemoteKeys.supported()) more.add(link("Botones del control", "gamepad", "Qué abre cada botón", "keys"));
             final Tile mode = new Tile("Pantalla de inicio", "home", null);
             final long[] armed = {0};
-            mode.value = () -> HomeMode.FREE.equals(HomeMode.state(c).optString("mode")) ? "Free My TV" : "Original";
+            final boolean freeNow = HomeMode.FREE.equals(HomeMode.state(c).optString("mode"));   // read once, not every frame
+            mode.value = () -> freeNow ? "Free My TV" : "Original";
             mode.stay = () -> {   // a big change: OK twice (the first only asks)
                 boolean free = HomeMode.FREE.equals(HomeMode.state(c).optString("mode"));
                 long now = android.os.SystemClock.uptimeMillis();

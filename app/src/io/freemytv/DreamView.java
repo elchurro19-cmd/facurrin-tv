@@ -174,11 +174,13 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
     void start() {
         if (running) return;
         running = true;
+        photoDark = false;
         if (worker.isShutdown()) worker = Executors.newSingleThreadExecutor();
         startedAt = clock();
         lastFrame = 0;
         failed.clear();
         source = Prefs.screensaverShown(getContext());
+        AppLog.w("screensaver source: " + source);
         if (source.equals("home")) {   // "El fondo del inicio": the home's pictures, starting with the one on it now
             String home = Prefs.homeBackgroundShown(getContext());
             source = Gallery.photos(home) ? home : Gallery.BING;
@@ -273,6 +275,13 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
             consumed = code;
             return true;
         }
+        if (photoDark) {   // dark: OK or an arrow brings the photos back; Back ends the screensaver
+            if (code == android.view.KeyEvent.KEYCODE_BACK) return false;
+            photoDark = false;
+            consumed = code;
+            invalidate();
+            return true;
+        }
         if (current == null || fallback || !"gallery".equals(current.pick.kind)) return false;
         switch (code) {
             case android.view.KeyEvent.KEYCODE_DPAD_UP:
@@ -305,7 +314,10 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
             case android.view.KeyEvent.KEYCODE_NUMPAD_ENTER:
                 if (menu == MENU_FAVORITE) favorite();
                 else if (menu == MENU_SOURCE) applySource(SOURCES[menuIndex]);
-                else return false;
+                else {   // OK with no menu: the photos go dark (black, the time faint); OK again brings them back
+                    photoDark = !photoDark;
+                    if (photoDark) showNotice("Modo oscuro  ·  OK vuelve a las fotos");
+                }
                 menu = MENU_NONE;
                 break;
             case android.view.KeyEvent.KEYCODE_BACK:
@@ -407,7 +419,7 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
             if (up < hintUntil && notice == null) {
                 cornerQuote.setAlpha(Math.round(200 * Ui.clamp((hintUntil - up) / 800f)));
                 cornerQuote.setTextAlign(Paint.Align.CENTER);
-                c.drawText("↑ favorita   ·   ↓ cambiar fondos   ·   ← → anterior y siguiente", cx, y + h * 0.65f, cornerQuote);
+                c.drawText("↑ favorita  ·  ↓ cambiar fondos  ·  ← → otra foto  ·  OK modo oscuro", cx, y + h * 0.65f, cornerQuote);
                 cornerQuote.setTextAlign(Paint.Align.LEFT);
                 cornerQuote.setAlpha(255);
             }
@@ -612,10 +624,20 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
             Gallery.Item item = null;
             List<Gallery.Item> list = gallery;
             if (list.isEmpty()) gallery = list = Gallery.list(ctx, kind);
-            if (startAtHome) {   // the photo Home shows first
+            if (startAtHome) {   // the photo Home shows, itself, first (then the ones after it in the same list)
                 startAtHome = false;
                 Gallery.Item cur = Gallery.current(ctx);
-                for (int i = 0; cur != null && i < list.size(); i++) if (list.get(i).url.equals(cur.url)) galleryNext = i;
+                if (cur != null) {
+                    for (int i = 0; i < list.size(); i++) if (list.get(i).url.equals(cur.url)) galleryNext = i + 1;
+                    try {
+                        images = Backdrop.photo(Gallery.image(ctx, cur), PW, PH, light);
+                        images[0] = Backdrop.gpu(withScrims(images[0], light[0], light[1]));
+                        item = cur;
+                    } catch (Exception | OutOfMemoryError e) {
+                        images = null;
+                    }
+                }
+                AppLog.w("screensaver: home's picture first: " + (cur == null ? "none" : cur.title) + " (" + kind + ")");
             }
             // One that won't download or decode doesn't stop the show: up to three tries.
             for (int tries = 0; tries < 3 && images == null && !list.isEmpty(); tries++) {
@@ -811,7 +833,8 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
         drawCaptions(canvas, up);
         drawNotice(canvas, up);
         drawMenu(canvas, up);
-        // (the dark look is the music screen's: without music, the photos with the time and the weather)
+        // Without music the photos show (the time and the weather on them); OK makes them dark for a while.
+        if (photoDark && !musicOn()) drawDark(canvas);
         drawMusicScreen(canvas);
     }
 
@@ -834,6 +857,8 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
     // A file, not SharedPreferences: the panel and the screensaver may run in different processes.
     private boolean darkNow;
     private volatile boolean startAtHome;
+    /** OK on the photos: dark (black, the time faint) until a key brings them back; this screensaver only. */
+    private boolean photoDark;
     private android.text.TextPaint darkClock;
 
     static boolean dark(Context c) {
