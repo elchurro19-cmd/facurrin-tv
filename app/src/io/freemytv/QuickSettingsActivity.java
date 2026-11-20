@@ -366,16 +366,18 @@ public class QuickSettingsActivity extends Activity {
 
             // Fondos: what's behind the home screen and the screensaver.
             final String[] bk = Gallery.bingKinds();
-            final String[] kinds = new String[bk.length + 2], savers = new String[bk.length + 2];
+            final String[] kinds = new String[bk.length + 2], savers = new String[bk.length + 3];
             kinds[0] = "black";
             System.arraycopy(bk, 0, kinds, 1, bk.length);
             kinds[kinds.length - 1] = Gallery.FAVORITES;
-            System.arraycopy(bk, 0, savers, 0, bk.length);
-            savers[bk.length] = Gallery.FAVORITES;
-            savers[bk.length + 1] = "clock";
+            savers[0] = "home";   // the home's own pictures (the default)
+            System.arraycopy(bk, 0, savers, 1, bk.length);
+            savers[bk.length + 1] = Gallery.FAVORITES;
+            savers[bk.length + 2] = "clock";
             final String[] kindNames = new String[kinds.length], saverNames = new String[savers.length];
             for (int i = 0; i < kinds.length; i++) kindNames[i] = kinds[i].equals("black") ? "Negro" : Gallery.name(kinds[i]);
-            for (int i = 0; i < savers.length; i++) saverNames[i] = savers[i].equals("clock") ? "Reloj" : Gallery.name(savers[i]);
+            for (int i = 0; i < savers.length; i++) saverNames[i] = savers[i].equals("clock") ? "Reloj"
+                    : savers[i].equals("home") ? "El fondo del inicio" : Gallery.name(savers[i]);
             final int[] minutes = {60, 360, 720, 1440, 10080};
             final String[] minuteNames = {"1 hora", "6 horas", "12 horas", "1 día", "1 semana"};
             List<Tile> bg = section("Fondos", "sync");

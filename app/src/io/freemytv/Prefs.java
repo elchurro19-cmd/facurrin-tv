@@ -231,9 +231,9 @@ final class Prefs {
 
     /** The screensaver: one of Gallery.KINDS passing by, or "clock" (the big clock, no photos). */
     static String screensaver(Context c) {
-        String v = readString(c, "screensaver.txt", Gallery.BING);
+        String v = readString(c, "screensaver.txt", "home");   // by default, the home's own pictures
         if (v.equals(Gallery.LANDSCAPES) || v.equals(Gallery.ART) || v.equals(Gallery.ABSTRACT) || v.equals(Gallery.ANIMALS)
-                || v.equals("modern")) return Gallery.BING;
+                || v.equals("modern")) return "home";
         return v;
     }
 

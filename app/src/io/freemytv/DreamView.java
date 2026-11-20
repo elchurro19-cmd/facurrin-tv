@@ -179,6 +179,11 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
         lastFrame = 0;
         failed.clear();
         source = Prefs.screensaverShown(getContext());
+        if (source.equals("home")) {   // "El fondo del inicio": the home's pictures, starting with the one on it now
+            String home = Prefs.homeBackgroundShown(getContext());
+            source = Gallery.photos(home) ? home : Gallery.BING;
+            startAtHome = true;
+        }
         hintUntil = 0;   // the keys' hint shows once per screensaver, on the first ← or →
         hinted = false;
         showMs = Prefs.screensaverSeconds(getContext()) * 1000L;
@@ -262,7 +267,7 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
             if (mine) consumed = -1;
             return mine;
         }
-        if (darkNow && !musicOn()) return false;   // the dark screensaver: any key ends it
+        // (without music the photos' keys work as always, dark or not)
         if (musicOn()) {   // Glass edition: the song's controls
             if (!musicKey(e)) return false;
             consumed = code;
@@ -607,6 +612,11 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
             Gallery.Item item = null;
             List<Gallery.Item> list = gallery;
             if (list.isEmpty()) gallery = list = Gallery.list(ctx, kind);
+            if (startAtHome) {   // the photo Home shows first
+                startAtHome = false;
+                Gallery.Item cur = Gallery.current(ctx);
+                for (int i = 0; cur != null && i < list.size(); i++) if (list.get(i).url.equals(cur.url)) galleryNext = i;
+            }
             // One that won't download or decode doesn't stop the show: up to three tries.
             for (int tries = 0; tries < 3 && images == null && !list.isEmpty(); tries++) {
                 item = list.get(galleryNext++ % list.size());
@@ -801,7 +811,7 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
         drawCaptions(canvas, up);
         drawNotice(canvas, up);
         drawMenu(canvas, up);
-        if (darkNow && !musicOn()) drawDark(canvas);
+        // (the dark look is the music screen's: without music, the photos with the time and the weather)
         drawMusicScreen(canvas);
     }
 
@@ -823,6 +833,7 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
     // Glass edition: the dark screensaver (a switch in the quick settings panel): black, the clock faint in the middle.
     // A file, not SharedPreferences: the panel and the screensaver may run in different processes.
     private boolean darkNow;
+    private volatile boolean startAtHome;
     private android.text.TextPaint darkClock;
 
     static boolean dark(Context c) {
