@@ -1370,7 +1370,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         // Glass edition: taller, for the bigger dock and the focused tile rising out of it (were 320 and 270).
         measure(platter, width, Math.round(380 * kk));
         measure(tiles, width, Math.round(340 * kk));
-        measure(drawerLayer, width, Math.round(600 * kk));
+        measure(drawerLayer, width, Math.round(700 * kk));   // taller: the saved backgrounds sit under the heart's pill
         measure(sheetLayer, width, height);
         measure(toastLayer, Math.round(1000 * kk), Math.round(220 * kk));
         setMeasuredDimension(width, height);
