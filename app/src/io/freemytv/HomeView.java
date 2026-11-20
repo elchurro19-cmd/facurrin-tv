@@ -139,6 +139,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private static final float CLOCK_LIFT = 56;   // the clock block, up from the bar
     private final RectF weekCard = new RectF();
 
+    private final RectF dockStrip = new RectF();
+    private TextPaint dockLabel, dockSub;
+
     private static boolean circle(HomeApps.Item it) {
         return it.kind == TEAM_KIND || it.kind == WX_KIND || it.kind == HEART_KIND;
     }
@@ -2940,16 +2943,15 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     private void layoutDrawer() {
         if (drawerPanel != 1) {   // D2: wide buttons in a row, centred
-            int n = drawerItems.size(), circles = 0;
-            for (HomeApps.Item it : drawerItems) if (circle(it)) circles++;
-            float gap = 24 * k, d = 110 * k, pills = Math.max(1, n - circles);
-            float bw = Math.min(400 * k, (CONTENT_R * k - MARGIN * k - circles * d - Math.max(0, n - 1) * gap) / pills);
-            float x = (w - ((n - circles) * bw + circles * d + Math.max(0, n - 1) * gap)) / 2, top = (ROW_TOP + 8) * k;
+            // P3: a dock of round icons, well apart, on a strip of glass; the focused one's name shows under it.
+            int n = drawerItems.size();
+            float gap = 64 * k, d = 116 * k;
+            float x = (w - (n * d + Math.max(0, n - 1) * gap)) / 2, top = (ROW_TOP + 8) * k;
             for (int i = 0; i < n; i++) {
-                float iw = circle(drawerItems.get(i)) ? d : bw;
-                drawerRects[i].set(x, top, x + iw, top + d);
-                x += iw + gap;
+                drawerRects[i].set(x, top, x + d, top + d);
+                x += d + gap;
             }
+            if (n > 0) dockStrip.set(drawerRects[0].left - 46 * k, top - 24 * k, drawerRects[n - 1].right + 46 * k, top + d + 24 * k);
             futbolCard.set((w - 1040 * k) / 2, CARDS_TOP * k, (w + 1040 * k) / 2, (CARDS_TOP + CARDS_H) * k);
             // The weather opens under the buttons as two cards side by side: now and the next hours, the next days.
             float wl = MARGIN * k, wr = CONTENT_R * k, split = wl + (wr - wl) * 0.585f;
@@ -3038,7 +3040,23 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         float titleBase = ROW_TITLE * k;
         if (drawerPanel == 1) c.drawText("Entradas  ·  Atrás vuelve", drawerRects[0].left + 4 * k, titleBase, rowTitle);
         if (drawerPanel != 1) {   // D2: the wide buttons, and the team's card under them when it's open
+            if (!drawerItems.isEmpty()) drawerGlass(c, dockStrip, dockStrip.height() / 2, 0.45f, 0x10000000, 6 * k);
             for (int i = 0; i < drawerItems.size(); i++) drawDrawerButton(c, i);
+            if (drawerPanel == 0 && zone == Z_DRAWER && drawerIndex < drawerItems.size()) {   // the name, under it
+                HomeApps.Item it = drawerItems.get(drawerIndex);
+                String[] tx = drawerText(it);
+                if (dockLabel == null) {
+                    dockLabel = new TextPaint(Ui.text(Ui.semibold, 27 * k, 0xFFFFFFFF));
+                    dockLabel.setTextAlign(Paint.Align.CENTER);
+                    dockSub = new TextPaint(Ui.text(Ui.regular, 21 * k, 0xCCFFFFFF));
+                    dockSub.setTextAlign(Paint.Align.CENTER);
+                    for (Paint sp : new Paint[] {dockLabel, dockSub}) sp.setShadowLayer(10 * k, 0, 2 * k, 0x80000000);
+                }
+                RectF r = drawerRects[drawerIndex];
+                float y = dockStrip.bottom + 44 * k + (it.kind == HEART_KIND ? 122 * k - 24 * k : 0);
+                c.drawText(tx[0], r.centerX(), y, dockLabel);
+                if (!tx[1].isEmpty()) c.drawText(tx[1], r.centerX(), y + 32 * k, dockSub);
+            }
             if (drawerPanel == 2 && Prefs.futbol()) drawTeamBig(c, futbolCard);
             if (drawerPanel == 5) drawFavsCard(c);
             if (drawerPanel == 3 && Prefs.weather()) {   // both at once: no pages to turn
@@ -3396,6 +3414,32 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         c.restore();
     }
 
+    /** A drawer button's name and its line (the apps' count, the next game, the weather now...). */
+    private String[] drawerText(HomeApps.Item it) {
+        String title = it.label, sub = "";
+        if (it.kind == TEAM_KIND) {
+            Futbol.Match m = teamMatch(false);
+            if (m == null) m = teamMatch(true);
+            if (m != null) {
+                boolean home = m.home.id.equals(Futbol.CLUB);
+                Futbol.Team me = home ? m.home : m.away, them = home ? m.away : m.home;
+                title = me.shortName;
+                long now = System.currentTimeMillis();
+                sub = m.live() || m.done() ? Futbol.score(m) + " vs " + them.shortName + (m.live() ? "  ·  " + Futbol.status(m, now) : "")
+                        : Futbol.status(m, now) + " vs " + them.shortName;
+            }
+        } else if (it.kind == WX_KIND) {
+            HomeData.Weather wx = data.weather;
+            if (!Double.isNaN(wx.temp)) sub = HomeData.degrees(wx.temp) + "  " + HomeData.condition(wx.code, wx.isDay);
+        } else if (it.kind == HEART_KIND) {
+            title = heartSub ? "Mis fondos" : heartOn ? "Fondo guardado" : "Guardar fondo";
+            sub = heartSub ? (favCount == 1 ? "1 guardado" : favCount + " guardados") : "↓ Mis fondos";
+        } else if (it.kind == HomeApps.ALL_APPS) sub = others.size() + " apps";
+        else if (it.kind == HomeApps.ANDROID_SETTINGS) sub = "Imagen, sonido, red";
+        else if (it.kind == HomeApps.INPUTS) sub = "TV en vivo · HDMI";
+        return new String[] {title, sub};
+    }
+
     /** D2: a wide drawer button: its symbol (the team's crest) on the left, the name and a line under it. */
     private void drawDrawerButton(Canvas c, int i) {
         HomeApps.Item it = drawerItems.get(i);
@@ -3425,7 +3469,22 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             btnTitle = new TextPaint(Ui.text(Ui.semibold, 27 * k, 0xFFFFFFFF));
             btnSub = new TextPaint(Ui.text(Ui.regular, 20 * k, 0xB3FFFFFF));
         }
-        if (circle(it)) {
+        if (true) {   // P3: every button is round, its icon alone
+            if (it.kind == HomeApps.APP && "globe".equals(it.symbol)) {   // the browser: a globe
+                if (heartStroke == null) {
+                    heartStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+                    heartStroke.setStyle(Paint.Style.STROKE);
+                    heartStroke.setStrokeJoin(Paint.Join.ROUND);
+                }
+                float gr = 22 * k * s;
+                heartStroke.setStrokeWidth(3.2f * k);
+                heartStroke.setColor(ink);
+                c.drawCircle(cx, cy, gr, heartStroke);
+                c.drawLine(cx - gr, cy, cx + gr, cy, heartStroke);
+                tmp.set(cx - gr * 0.5f, cy - gr, cx + gr * 0.5f, cy + gr);
+                c.drawOval(tmp, heartStroke);
+                return;
+            }
             if (it.kind == HEART_KIND) {   // filled: the background on screen is saved
                 drawHeart(c, cx, cy + 2 * k * s, 21 * k * s, ink, heartOn);
                 return;
@@ -3436,7 +3495,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 Bitmap crest = m == null ? null : m.home.id.equals(Futbol.CLUB) ? m.home.crest : m.away.crest;
                 if (crest != null) drawCrest(c, crest, cx - 32 * k * s, cy, 64 * k * s, 1);
                 else Symbols.draw(getContext(), c, "tv", cx, cy, 40 * k * s, ink);
-            } else Symbols.draw(getContext(), c, it.symbol, cx, cy, 46 * k * s, ink);
+            } else Symbols.draw(getContext(), c, it.symbol, cx, cy, (it.kind == WX_KIND ? 46 : 40) * k * s, ink);
             return;
         }
         String title = it.label, sub = "";
