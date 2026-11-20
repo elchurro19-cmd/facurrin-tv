@@ -349,10 +349,14 @@ public class QuickSettingsActivity extends Activity {
             final String[] clubNames = new String[clubs.length], nationNames = new String[nations.length];
             for (int i = 0; i < clubs.length; i++) clubNames[i] = clubs[i][1];
             for (int i = 0; i < nations.length; i++) nationNames[i] = nations[i][1];
-            final Tile clubT = new Tile("Club favorito", "ball", null);
+            final Tile clubT = new Tile("Mis equipos", "ball", null);
             clubT.opens = true;
-            clubT.value = () -> !Prefs.clubName().isEmpty() ? Prefs.clubName() : clubNames[SettingsActivity.SettingsView.indexOf(clubs, Prefs.club())];
-            clubT.stay = () -> askLive("Club favorito", "Escribí el club (aparecen mientras escribís)", false);
+            clubT.value = () -> {
+                List<String[]> l = Prefs.clubs();
+                String first = l.get(0)[1].isEmpty() ? clubNames[SettingsActivity.SettingsView.indexOf(clubs, l.get(0)[0])] : l.get(0)[1];
+                return l.size() == 1 ? first : first + " y " + (l.size() - 1) + " más";
+            };
+            clubT.stay = this::openTeams;
             home.add(clubT);
             final Tile nationT = new Tile("Selección", "ball", null);
             nationT.opens = true;
@@ -404,10 +408,6 @@ public class QuickSettingsActivity extends Activity {
             Tile tv = new Tile("Ajustes de la TV", "tv_settings", () -> open(new Intent(Settings.ACTION_SETTINGS)));
             tv.sub = "Imagen, sonido, red, apps";
             quick.add(tv);
-            Tile shelfT = new Tile("Estante", "apps", null);
-            shelfT.sub = "Qué apps van en la barra y en qué orden";
-            shelfT.stay = this::openShelf;
-            more.add(shelfT);
             if (RemoteKeys.supported()) more.add(link("Botones del control", "gamepad", "Qué abre cada botón", "keys"));
             final Tile mode = new Tile("Pantalla de inicio", "home", null);
             final long[] armed = {0};
@@ -557,6 +557,44 @@ public class QuickSettingsActivity extends Activity {
             }).start();
         }
 
+        /** "Mis equipos": each club followed (OK takes it off, with a second OK), and a row to add one. */
+        private void openTeams() {
+            final String[][] liga = SettingsActivity.SettingsView.CLUBS;
+            List<Tile> list = new ArrayList<>();
+            final List<String[]> mine = Prefs.clubs();
+            for (final String[] t : mine) {
+                String name = t[1].isEmpty() ? liga[SettingsActivity.SettingsView.indexOf(liga, t[0])][1] : t[1];
+                final Tile row = new Tile(name, "ball", null);
+                final long[] armed = {0};
+                row.sub = mine.size() > 1 ? "OK para quitarlo" : "Tu único equipo";
+                row.stay = () -> {
+                    if (mine.size() <= 1) return;   // at least one
+                    long now = android.os.SystemClock.uptimeMillis();
+                    if (now - armed[0] > 3000) {
+                        armed[0] = now;
+                        row.sub = "OK otra vez para quitarlo";
+                        invalidate();
+                        return;
+                    }
+                    List<String[]> left = new ArrayList<>();
+                    for (String[] o : Prefs.clubs()) if (!o[0].equals(t[0])) left.add(o);
+                    Prefs.setClubs(left);
+                    changed();
+                    closeSub();
+                    openTeams();
+                };
+                list.add(row);
+            }
+            Tile add = new Tile("+ Agregar equipo", "ball", null);
+            add.sub = "Buscalo escribiendo";
+            add.stay = () -> {
+                closeSub();
+                askLive("Agregar equipo", "Escribí el club (aparecen mientras escribís)", false);
+            };
+            list.add(add);
+            openSub("Mis equipos", list);
+        }
+
         /** The box stays first; the matches follow it. */
         private void showMatches(List<String[]> found, final boolean nation) {
             if (subList == null || subList.isEmpty()) return;
@@ -570,9 +608,12 @@ public class QuickSettingsActivity extends Activity {
                     if (nation) {
                         Prefs.setNation(tm[0]);
                         Prefs.setNationName(tm[1]);
-                    } else {
-                        Prefs.setClub(tm[0]);
-                        Prefs.setClubName(tm[1]);
+                    } else {   // one more club in "Mis equipos"
+                        List<String[]> l = Prefs.clubs();
+                        boolean have = false;
+                        for (String[] o : l) have |= o[0].equals(tm[0]);
+                        if (!have) l.add(new String[] {tm[0], tm[1]});
+                        Prefs.setClubs(l);
                     }
                     changed();
                     leaveField();

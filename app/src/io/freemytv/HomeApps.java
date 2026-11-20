@@ -94,7 +94,7 @@ final class HomeApps {
         {"globoplay", "Globoplay", "com.globo.globotv", "FF5A1F", "tint", "1"},
         {"spotify", "Spotify", "com.spotify.tv.android", "1DB954", "", "1"},
     };
-    static final int MAX_SHELF = 8;
+    static final int MAX_SHELF = 6;   // Glass: five or six apps on the bar, no more
     /** Live TV apps of some brands (the antenna's channels open through the standard Android request first). */
     static final String[] LIVE_TV_APPS = {"com.tcl.tv", "com.google.android.tv", "com.mediatek.wwtv.tvcenter", "com.sony.dtv.tvx",
             "com.smartdevice.livetv", "com.mediatek.tv.oneworld.tvcenter"};

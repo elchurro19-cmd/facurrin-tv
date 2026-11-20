@@ -140,6 +140,7 @@ final class HomeData {
             sports.execute(() -> {
                 try {
                     Futbol.CLUB = Prefs.club();
+                    Futbol.CLUBS = Prefs.clubIds();
                     Futbol.NATION = Prefs.nation();
                     if (Futbol.weekMissing()) publish(Futbol.fetch(crestDir, true));
                     publish(Futbol.fetch(crestDir, false));

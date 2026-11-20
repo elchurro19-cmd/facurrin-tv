@@ -253,7 +253,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     // Moving apps on the shelf (as on Apple TV): hold OK on a tile, then ← → move it, OK drops it, Back cancels. The
     // lifted tile wiggles; the others slide to their new places (each slot's x offset is a spring that returns to 0).
     private static final long HOLD_MS = 500, WIGGLE_MS = 300;
-    private static final float LIFT_GROW = 0.08f, WIGGLE_DEG = 1.5f;
+    private static final float LIFT_GROW = 0.08f, WIGGLE_DEG = 0f;   // no wiggle: the lifted app just rises
     private boolean reordering, reorderAnim, okHeld, holdArmed;
     private int liftIndex = -1;
     private long reorderAt;
@@ -271,8 +271,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     // MARK: - App options (Info, Remove, Uninstall)
 
-    private static final String[] SHELF_ALL = {"Información", "Reemplazar", "Quitar del estante", "Desinstalar"};
-    private static final String[] GRID_ALL = {"Mover", "Agregar al estante", "Información", "Desinstalar"};
+    private static final String[] SHELF_ALL = {"Información", "Reemplazar", "Quitar de la barra", "Desinstalar"};
+    private static final String[] GRID_ALL = {"Mover", "Agregar a la barra", "Información", "Desinstalar"};
     /** The options of the app whose menu is open: without Uninstall for the TV's own (system) apps. */
     private String[] shelfOptions = SHELF_ALL, gridOptions = GRID_ALL;
 
@@ -453,19 +453,23 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 case "Reemplazar":
                     startReplace(pkg);
                     break;
-                case "Quitar del estante": {
+                case "Quitar de la barra": {
                     List<String> list = new ArrayList<>(HomeApps.shelfPackages(c));
                     list.remove(pkg);
                     Prefs.setShelf(list);
                     reload();
                     break;
                 }
-                default: {   // "Agregar al estante"
+                default: {   // "Agregar a la barra"
                     List<String> list = new ArrayList<>(HomeApps.shelfPackages(c));
+                    if (!list.contains(pkg) && list.size() >= HomeApps.MAX_SHELF) {
+                        showToast("La barra ya tiene " + HomeApps.MAX_SHELF + " apps: quitá una primero");
+                        break;
+                    }
                     if (!list.contains(pkg)) list.add(pkg);
                     Prefs.setShelf(list);
                     reload();
-                    showToast("Agregada al estante");
+                    showToast("Agregada a la barra");
                     break;
                 }
             }
@@ -1569,7 +1573,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         if (watchFading || watchDirty || drawerMoving || sheetMoving || motionDirty) placeWatch();
         if (bgFading) sky.invalidate();
         if (drawerMoving || bgFading) updateVeil();
-        if (bgFading || (drawerWasMoving && !drawerMoving)) platter.invalidate();
+        if (bgFading) platter.invalidate();   // (not when the drawer stops: it faded away, so nothing jumps)
         drawerWasMoving = drawerMoving;
         tilesDirty = statusDirty = heroDirty = drawerDirty = gridDirty = motionDirty = watchDirty = false;
         if (updateClock()) {
@@ -1614,7 +1618,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         float lift = -d * shift;
         show(heroLayer, top, lift);
         show(status, top, lift);
-        show(platter, home, lift);
+        show(platter, home * (1 - smoothstep(0, 0.45f, dc)), lift);   // the glass fades instead of being redrawn
         show(tiles, home, lift);
         float da = home * smoothstep(0.1f, 0.6f, dc);
         drawerLayer.setTranslationY((1 - d) * shift);
@@ -2022,12 +2026,12 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     private void setShelf(List<HomeApps.Item> list) {
         wake();
-        if (iconDock()) {   // the wheel ends in "Más apps" (All Apps)
+        {   // the bar ends in All Apps (the wheel's "Más apps"; on the cards, a rounded square)
             boolean has = false;
             for (HomeApps.Item it : list) has |= it.kind == HomeApps.ALL_APPS;
             if (!has) {
                 list = new ArrayList<>(list);
-                list.add(HomeApps.action(HomeApps.ALL_APPS, "all", "Más apps", "apps"));
+                list.add(HomeApps.action(HomeApps.ALL_APPS, "all", iconDock() ? "Más apps" : "Todas las apps", "apps"));
             }
         }
         cancelReorder(true);    // the list changed under the move (an app installed or removed)
@@ -2099,15 +2103,18 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         float full = (CONTENT_R - MARGIN) * k;
         // Tiles in the TV banners' own 16:9, so an app's art is never stretched; never taller than L_TILE_H. The glass
         // keeps its bottom edge, so with more apps it only gets lower.
-        float tw = Math.min(L_TILE_H * 16f / 9 * k, (full - Math.max(0, n - 1) * gap) / Math.max(1, n));
+        int squares = 0;   // All Apps is a square: as wide as the cards are tall
+        for (HomeApps.Item it : shelf) if (it.kind == HomeApps.ALL_APPS) squares++;
+        float tw = Math.min(L_TILE_H * 16f / 9 * k, (full - Math.max(0, n - 1) * gap) / Math.max(1f, n - squares + squares * 9f / 16));
         float th = tw * 9f / 16;
-        float width = n * tw + Math.max(0, n - 1) * gap, left = (w - width) / 2f;
+        float width = (n - squares) * tw + squares * th + Math.max(0, n - 1) * gap, left = (w - width) / 2f;
         float top = (L_PLATTER_TOP + L_TILE_H) * k - th;
         platterRect.set(left - pad, top, left + width + pad, top + th + 2 * pad);
         float x = left, y = top + pad;
         for (int i = 0; i < n; i++) {
-            tileRects[i].set(x, y, x + tw, y + th);
-            x += tw + gap;
+            float iw = shelf.get(i).kind == HomeApps.ALL_APPS ? th : tw;
+            tileRects[i].set(x, y, x + iw, y + th);
+            x += iw + gap;
         }
         crispLogos.clear();
     }
@@ -2367,7 +2374,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
         float x = r.left + 34 * k, right = r.right - 34 * k;
         Futbol.Match m = next != null ? next : last;
-        String club = m.home.id.equals(Futbol.CLUB) ? m.home.shortName : m.away.shortName;
+        String club = Futbol.isClub(m.home.id) ? m.home.shortName : m.away.shortName;
         c.drawText("Tu equipo  ·  " + club, x, r.top + 54 * k, cardTitle);
         teamBig.setColor(cardText.getColor());
         teamSmall.setColor(cardDim.getColor());
@@ -2508,6 +2515,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
         HomeApps.Item it = shelf.get(i);
         if (iconDock() && (it.pkg != null || it.kind == HomeApps.ALL_APPS) && drawDockIcon(c, i, it)) return;
+        if (!iconDock() && it.kind == HomeApps.ALL_APPS) {
+            drawAllAppsSquare(c, i, it);
+            return;
+        }
         // Lifted to be moved: a little bigger than focused, with a deeper shadow.
         float l = i == liftIndex ? Math.max(0, moveLift.value) : 0;
         float f = tileFocus[i].value, fc = Ui.clamp(f), s = (1 + FOCUS_GROW * f + LIFT_GROW * l);
@@ -2885,7 +2896,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         List<HomeApps.Item> list = new ArrayList<>();
         HomeApps.Item browser = null;
         for (HomeApps.Item it : HomeApps.drawerShortcuts(c)) {
-            if (it.kind == HomeApps.ALL_APPS) it.label = "Todas las apps";
+            if (it.kind == HomeApps.ALL_APPS) continue;   // at the end of the bar now
             if (it.kind == HomeApps.ANDROID_SETTINGS) continue;   // in the control center now (Más)
             if (it.kind == HomeApps.APP) browser = it;
             else list.add(it);
@@ -3085,6 +3096,42 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private final Bitmap[] crestFor = new Bitmap[2], crestSoft = new Bitmap[2];
     private TextPaint teamName, teamHuge, teamLabel, teamPill;
     private final android.graphics.Path teamClip = new android.graphics.Path();
+
+    private TextPaint allAppsLabel;
+
+    /** The cards' last tile: All Apps, a rounded square of glass with nine dots and its name; focused, white. */
+    private void drawAllAppsSquare(Canvas c, int i, HomeApps.Item it) {
+        float f = Ui.clamp(tileFocus[i].value), s = 1 + FOCUS_GROW * f;
+        RectF base = tileRects[i];
+        float cx = base.centerX(), cy = base.centerY() - 6 * k * f, half = base.width() * s / 2;
+        cell.set(cx - half, cy - half, cx + half, cy + half);
+        float r = TILE_RADIUS * k * s;
+        tmp.set(cell);
+        tmp.offset(0, (8 + 12 * f) * k);
+        shadow.setColor(Ui.alpha(0xFF000000, 0.25f + 0.3f * f));
+        shadows.draw(c, tmp, r, SHADOW_BLUR * k, shadow);
+        fill.setShader(null);
+        fill.setColor(blend(0x47FFFFFF, WHITE, f));
+        c.drawRoundRect(cell, r, r, fill);
+        focusRing.setStrokeWidth(2 * k);
+        focusRing.setColor(Ui.alpha(0x8CFFFFFF, 1 - f));
+        c.drawRoundRect(cell, r, r, focusRing);
+        int ink = blend(0xFFFFFFFF, INK, f);
+        fill.setColor(ink);
+        float q = cell.width(), d = q * 0.085f, gx = cell.left + q * 0.5f, gy = cell.top + q * 0.4f;
+        for (int row = 0; row < 3; row++) for (int col = 0; col < 3; col++) {
+            float px = gx + (col - 1) * q * 0.16f, py = gy + (row - 1) * q * 0.16f;
+            tmp.set(px - d / 2, py - d / 2, px + d / 2, py + d / 2);
+            c.drawRoundRect(tmp, d * 0.25f, d * 0.25f, fill);
+        }
+        if (allAppsLabel == null) {
+            allAppsLabel = new TextPaint(Ui.text(Ui.semibold, 21 * k, 0xFFFFFFFF));
+            allAppsLabel.setTextAlign(Paint.Align.CENTER);
+        }
+        allAppsLabel.setTextSize(21 * k * s);
+        allAppsLabel.setColor(ink);
+        c.drawText("Todas las apps", cx, cell.top + q * 0.84f, allAppsLabel);
+    }
 
     /** One box-blur pass over ARGB pixels (each channel, alpha too), along rows or columns. */
     private static void boxBlurAlpha(int[] src, int[] dst, int w, int h, int r, boolean rows) {
@@ -3429,7 +3476,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             Futbol.Match m = teamMatch(false);
             if (m == null) m = teamMatch(true);
             if (m != null) {
-                boolean home = m.home.id.equals(Futbol.CLUB);
+                boolean home = Futbol.isClub(m.home.id);
                 Futbol.Team me = home ? m.home : m.away, them = home ? m.away : m.home;
                 title = me.shortName;
                 long now = System.currentTimeMillis();
@@ -3503,7 +3550,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             if (it.kind == TEAM_KIND) {
                 Futbol.Match m = teamMatch(false);
                 if (m == null) m = teamMatch(true);
-                Bitmap crest = m == null ? null : m.home.id.equals(Futbol.CLUB) ? m.home.crest : m.away.crest;
+                Bitmap crest = m == null ? null : Futbol.isClub(m.home.id) ? m.home.crest : m.away.crest;
                 if (crest != null) drawCrest(c, crest, cx - 32 * k * s, cy, 64 * k * s, 1);
                 else Symbols.draw(getContext(), c, "tv", cx, cy, 40 * k * s, ink);
             } else Symbols.draw(getContext(), c, it.symbol, cx, cy, (it.kind == WX_KIND ? 46 : 40) * k * s, ink);
@@ -3515,7 +3562,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             Futbol.Match m = teamMatch(false);
             if (m == null) m = teamMatch(true);
             if (m != null) {
-                boolean home = m.home.id.equals(Futbol.CLUB);
+                boolean home = Futbol.isClub(m.home.id);
                 Futbol.Team me = home ? m.home : m.away, them = home ? m.away : m.home;
                 title = me.shortName;
                 long now = System.currentTimeMillis();
@@ -4792,7 +4839,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         retarget(false);
         if (!changed) return;
         final List<String> order = new ArrayList<>();
-        for (HomeApps.Item it : shelf) order.add(it.pkg);
+        for (HomeApps.Item it : shelf) if (it.pkg != null) order.add(it.pkg);   // not the All Apps square
         final Context c = getContext().getApplicationContext();
         LOADER.execute(() -> {
             // The saved list may hold more than the shelf shows (apps not installed, past the limit): the shown ones

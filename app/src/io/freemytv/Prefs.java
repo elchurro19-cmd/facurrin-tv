@@ -355,6 +355,35 @@ final class Prefs {
     static void setClub(String id) { put("club", id); }
     /** The club's and the team's names as the search found them (any club, not only the Liga's). */
     static String clubName() { return sp().getString("club_name", ""); }
+
+    /** "Mis equipos": every club followed, as "id=name" pairs separated by "|" (the first is club()). */
+    static java.util.List<String[]> clubs() {
+        java.util.List<String[]> out = new java.util.ArrayList<>();
+        String v = sp().getString("clubs", "");
+        for (String pair : v.split("\\|")) {
+            int at = pair.indexOf('=');
+            if (at > 0) out.add(new String[] {pair.substring(0, at), pair.substring(at + 1)});
+        }
+        if (out.isEmpty()) out.add(new String[] {club(), clubName()});
+        return out;
+    }
+
+    static void setClubs(java.util.List<String[]> list) {
+        StringBuilder sb = new StringBuilder();
+        for (String[] t : list) sb.append(sb.length() == 0 ? "" : "|").append(t[0]).append('=').append(t[1].replace("|", " ").replace("=", " "));
+        put("clubs", sb.toString());
+        if (!list.isEmpty()) {
+            setClub(list.get(0)[0]);
+            setClubName(list.get(0)[1]);
+        }
+    }
+
+    static String[] clubIds() {
+        java.util.List<String[]> l = clubs();
+        String[] out = new String[l.size()];
+        for (int i = 0; i < out.length; i++) out[i] = l.get(i)[0];
+        return out;
+    }
     static void setClubName(String n) { put("club_name", n); }
     static String nationName() { return sp().getString("nation_name", ""); }
     static void setNationName(String n) { put("nation_name", n); }

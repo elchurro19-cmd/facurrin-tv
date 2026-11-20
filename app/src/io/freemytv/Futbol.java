@@ -39,6 +39,13 @@ final class Futbol {
 
     /** The favourite club and national team (ESPN ids), from Home Settings; Racing and Argentina by default. */
     static volatile String CLUB = "15", NATION = "202";
+    /** Glass: every club followed ("Mis equipos"); CLUB is the first. */
+    static volatile String[] CLUBS = {"15"};
+
+    static boolean isClub(String id) {
+        for (String c : CLUBS) if (c.equals(id)) return true;
+        return false;
+    }
     private static final String BASE = "https://site.api.espn.com/apis/site/v2/sports/soccer/";
     /** Scoreboards to scan, most important first. */
     // In order of weight (the first goes first at the same moment): the World Cup, Copa América, CONMEBOL's World Cup
@@ -80,7 +87,7 @@ final class Futbol {
         }
         boolean done() { return "post".equals(state); }
         boolean has(String team) { return team.equals(home.id) || team.equals(away.id); }
-        boolean club() { return has(CLUB); }
+        boolean club() { return isClub(home.id) || isClub(away.id); }
     }
 
     static final class Result {
@@ -133,7 +140,8 @@ final class Futbol {
             if (scoreboard(LEAGUES[i], "", LEAGUES.length - i, all)) any = true;
         }
         List<Match> racing = new ArrayList<>(), arg = new ArrayList<>();
-        if (team(CLUB, racing, all) | team(NATION, arg, all)) any = true;
+        for (String id : CLUBS) if (team(id, racing, all)) any = true;   // every club followed, in one list
+        if (team(NATION, arg, all)) any = true;
         if (!any) throw new Exception("no answer from ESPN");
 
         numberFechas(racing, all.values());
