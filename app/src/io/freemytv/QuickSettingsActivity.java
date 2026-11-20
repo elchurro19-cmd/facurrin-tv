@@ -89,6 +89,9 @@ public class QuickSettingsActivity extends Activity {
         String section;
         boolean line;
         java.util.function.BooleanSupplier on;
+        /** U2: a value shown on the right ("‹ Oscuro ›"), stepped by ← → (and OK). */
+        java.util.function.Supplier<String> value;
+        java.util.function.IntConsumer cycle;
 
         Tile(String title, String symbol, Runnable action) {
             this.title = title;
@@ -135,20 +138,79 @@ public class QuickSettingsActivity extends Activity {
             in.start();
         }
 
+        /** U2: one panel for everything: Rápido, Entradas, Inicio, Fondos and Más, each a section on the icon rail. */
+        private final List<String> sectNames = new ArrayList<>(), sectIcons = new ArrayList<>();
+        private final List<List<Tile>> sectTiles = new ArrayList<>();
+        private int sect, side;   // side 0: the rail, 1: the section's rows (focus is the row)
+
+        private Tile curTile() {
+            List<Tile> l = sectTiles.get(sect);
+            return l.get(Math.max(0, Math.min(l.size() - 1, focus)));
+        }
+
+        private List<Tile> section(String name, String icon) {
+            sectNames.add(name);
+            sectIcons.add(icon);
+            List<Tile> l = new ArrayList<>();
+            sectTiles.add(l);
+            return l;
+        }
+
+        private Tile toggle(String title, String symbol, java.util.function.BooleanSupplier get, Runnable flip) {
+            Tile t = new Tile(title, symbol, null);
+            t.on = get;
+            t.stay = () -> {
+                flip.run();
+                changed();
+            };
+            return t;
+        }
+
+        private Tile cycle(String title, String symbol, java.util.function.Supplier<String> value, java.util.function.IntConsumer step) {
+            Tile t = new Tile(title, symbol, null);
+            t.value = value;
+            t.cycle = d -> {
+                step.accept(d);
+                changed();
+            };
+            t.stay = () -> t.cycle.accept(1);
+            return t;
+        }
+
+        /** A link into the settings' longer screens (pickers, the shelf, the remote's buttons). */
+        private Tile link(String title, String symbol, String sub, String what) {
+            Tile t = new Tile(title, symbol, () -> open(new Intent(getContext(), SettingsActivity.class).putExtra("open", what)));
+            t.sub = sub;
+            return t;
+        }
+
+        private void changed() {
+            HomeData.get(getContext()).settingsChanged();
+            invalidate();
+        }
+
+        private int at(String[] list, String v) {
+            int i = java.util.Arrays.asList(list).indexOf(v);
+            return Math.max(0, i);
+        }
+
         private void buildTiles() {
-            Context c = getContext();
-            tiles.add(wifi = new Tile("Wi-Fi", "wifi", () -> open(new Intent(Settings.ACTION_WIFI_SETTINGS))));
-            tiles.add(bluetooth = new Tile("Bluetooth", "bluetooth", () -> open(bluetoothSettings())));
-            // Glass edition (option C1, like the iPhone's): brightness and volume as wide sliders.
+            final Context c = getContext();
+            // Rápido: what's used every day.
+            List<Tile> quick = section("Rápido", "wifi");
+            quick.add(wifi = new Tile("Wi-Fi", "wifi", () -> open(new Intent(Settings.ACTION_WIFI_SETTINGS))));
+            wifi.on = () -> wifiState;
+            quick.add(bluetooth = new Tile("Bluetooth", "bluetooth", () -> open(bluetoothSettings())));
+            bluetooth.on = () -> btState;
             final Tile bright = new Tile("Brillo del inicio", "sunny", null);
             bright.wide = true;
             bright.level = () -> 1 - Prefs.launcherDim(c) / 100.0;
-            bright.adjust = d -> {   // 10 % to 100 %, a tenth a step: right brightens, left dims
+            bright.adjust = d -> {   // 10 % to 100 %, a tenth a step
                 int now = Math.round(Prefs.launcherDim(c) / 10f) * 10;
                 Prefs.setLauncherDim(c, Math.max(0, Math.min(90, now - d * 10)));
             };
             bright.stay = () -> { };
-            tiles.add(bright);
+            quick.add(bright);
             final android.media.AudioManager audio = c.getSystemService(android.media.AudioManager.class);
             if (audio != null) {
                 final Tile volume = new Tile("Volumen", "speaker", null);
@@ -159,10 +221,9 @@ public class QuickSettingsActivity extends Activity {
                         d > 0 ? android.media.AudioManager.ADJUST_RAISE : android.media.AudioManager.ADJUST_LOWER, 0);
                 volume.stay = () -> audio.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC,
                         android.media.AudioManager.ADJUST_TOGGLE_MUTE, 0);
-                tiles.add(volume);
+                quick.add(volume);
             }
             Tile dream = new Tile("Protector", "bedtime", () -> slideOutThen(() -> {
-                // Straight into the screensaver: the panel has slid away, so no closing animation of its own.
                 try {
                     c.startActivity(screensaverNow().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
                 } catch (RuntimeException e) {
@@ -172,134 +233,88 @@ public class QuickSettingsActivity extends Activity {
                 overridePendingTransition(0, 0);
             }));
             dream.sub = "Activar ahora";
-            tiles.add(dream);
-            // Glass edition: the screensaver in the dark (black, a faint clock); the song still shows when one plays.
-            final Tile dark = new Tile("Protector oscuro", "clear_night", null);
-            dark.sub = DreamView.dark(c) ? "Activado" : "Desactivado";
-            dark.stay = () -> {
-                boolean on = !DreamView.dark(c);
-                DreamView.setDark(c, on);
-                dark.sub = on ? "Activado" : "Desactivado";
-                invalidate();
-            };
-            tiles.add(dark);
-            Tile picture = new Tile("Imagen y sonido", "picture", () -> open(RemoteKeys.quickSettings(c)));
-            picture.sub = "Brillo y modos";
-            tiles.add(picture);
-            if (installed("com.tcl.suspension")) {
-                Tile inputs = new Tile("Entradas", "hdmi", () -> {
+            quick.add(dream);
+            quick.add(toggle("Protector oscuro", "clear_night", () -> DreamView.dark(c), () -> DreamView.setDark(c, !DreamView.dark(c))));
+
+            // Entradas: TV en vivo and the HDMI inputs, straight from here.
+            List<Tile> ins = section("Entradas", "hdmi");
+            for (final HomeApps.Item it : HomeApps.allInputs(c)) {
+                Tile t = new Tile(it.label, it.kind == HomeApps.LIVE_TV ? "live_tv" : "hdmi", () -> {
                     finish();
-                    try {
-                        c.startService(new Intent("com.tcl.quickpanel.show.window")
-                                .setComponent(new ComponentName("com.tcl.suspension", "com.tcl.suspension.DismissService")));
-                    } catch (RuntimeException ignored) {
-                    }
+                    if (!HomeApps.open(QuickSettingsActivity.this, it, null, 0, 0, 0, 0)) AppLog.w("couldn't open " + it.label);
                 });
-                inputs.sub = "HDMI y TV";
-                tiles.add(inputs);
+                t.sub = it.kind == HomeApps.LIVE_TV ? "Canales de aire" : it.connected ? "Conectado" : "Sin señal";
+                ins.add(t);
             }
-            Tile all = new Tile("Ajustes", "settings", () -> open(new Intent(Settings.ACTION_SETTINGS)));
-            all.sub = "Todos los ajustes";
-            tiles.add(all);
-            Tile home = new Tile("Inicio", "sparkles", () -> open(new Intent(c, SettingsActivity.class)));
-            tiles.add(home);
-            // The DLNA receiver lives in the remote's service: only where that service runs.
+            if (ins.isEmpty()) {
+                Tile none = new Tile("No hay entradas", "hdmi", null);
+                none.stay = () -> { };
+                ins.add(none);
+            }
+
+            // Inicio: the home screen's own settings (the longer ones open their screen).
+            final String[] themes = {"auto", "light", "dark"}, themeNames = {"Automático", "Claro", "Oscuro"};
+            final String[] units = {"auto", "C", "F"}, unitNames = {"Automática", "°C", "°F"};
+            List<Tile> home = section("Inicio", "home");
+            home.add(cycle("Tema", "clear_night", () -> themeNames[at(themes, Prefs.theme())],
+                    d -> Prefs.setTheme(themes[(at(themes, Prefs.theme()) + d + 3) % 3])));
+            home.add(cycle("Temperatura", "sunny", () -> unitNames[at(units, Prefs.temperature())],
+                    d -> Prefs.setTemperature(units[(at(units, Prefs.temperature()) + d + 3) % 3])));
+            home.add(cycle("Estilo de la barra", "apps", () -> Prefs.shelfStyle().equals("icons") ? "Íconos" : "Tarjetas",
+                    d -> Prefs.setShelfStyle(Prefs.shelfStyle().equals("icons") ? "cards" : "icons")));
+            home.add(toggle("Clima", "partly_cloudy_day", Prefs::weather, () -> Prefs.setWeather(!Prefs.weather())));
+            home.add(toggle("Fútbol", "sparkles", Prefs::futbol, () -> Prefs.setFutbol(!Prefs.futbol())));
+            home.add(toggle("Continuar viendo", "play", Prefs::watchNext, () -> Prefs.setWatchNext(!Prefs.watchNext())));
+            home.add(toggle("Sonidos al navegar", "speaker", Prefs::sounds, () -> Prefs.setSounds(!Prefs.sounds())));
+            home.add(link("Idioma", "settings", "", "language"));
+            home.add(link("Ciudad", "home", Prefs.city(), "city"));
+            home.add(link("Club y selección", "sparkles", "", "club"));
+
+            // Fondos: what's behind the home screen and the screensaver.
+            final String[] kinds = {"black", Gallery.BING, Gallery.LANDSCAPES, Gallery.ART, Gallery.ABSTRACT, Gallery.ANIMALS, Gallery.FAVORITES};
+            final String[] savers = {Gallery.BING, Gallery.LANDSCAPES, Gallery.ART, Gallery.ABSTRACT, Gallery.ANIMALS, Gallery.FAVORITES, "clock"};
+            final int[] minutes = {60, 360, 720, 1440, 10080};
+            final String[] minuteNames = {"1 hora", "6 horas", "12 horas", "1 día", "1 semana"};
+            List<Tile> bg = section("Fondos", "sync");
+            bg.add(cycle("Fondo del inicio", "sync", () -> {
+                String k = Prefs.homeBackground(c);
+                return k.equals("black") ? "Negro" : Gallery.name(k);
+            }, d -> Prefs.setHomeBackground(c, kinds[(at(kinds, Prefs.homeBackground(c)) + d + kinds.length) % kinds.length])));
+            bg.add(cycle("Cambiar cada", "sync", () -> {
+                int m = Prefs.homeBackgroundMinutes(c);
+                for (int i = 0; i < minutes.length; i++) if (minutes[i] == m) return minuteNames[i];
+                return minuteNames[1];
+            }, d -> {
+                int m = Prefs.homeBackgroundMinutes(c), i = 1;
+                for (int j = 0; j < minutes.length; j++) if (minutes[j] == m) i = j;
+                Prefs.setHomeBackgroundMinutes(c, minutes[(i + d + minutes.length) % minutes.length]);
+            }));
+            Tile next = new Tile("Cambiar fondo ahora", "sync", null);
+            next.stay = () -> Prefs.skipHomeBackground(c);
+            bg.add(next);
+            bg.add(cycle("Protector de pantalla", "bedtime", () -> {
+                String k = Prefs.screensaver(c);
+                return k.equals("clock") ? "Reloj" : Gallery.name(k);
+            }, d -> Prefs.setScreensaver(c, savers[(at(savers, Prefs.screensaver(c)) + d + savers.length) % savers.length])));
+            bg.add(link("Más opciones de fondos", "sparkles", "Tema de temporada, favoritas, orden", "backgrounds"));
+
+            // Más: the TV's own settings and the rest.
+            List<Tile> more = section("Más", "settings");
+            Tile tv = new Tile("Ajustes de la TV", "tv_settings", () -> open(new Intent(Settings.ACTION_SETTINGS)));
+            tv.sub = "Imagen, sonido, red, apps";
+            more.add(tv);
+            more.add(link("Estante", "apps", "Qué apps van en la barra", "shelf"));
+            more.add(link("Botones del control", "gamepad", "Qué abre cada botón", "keys"));
+            more.add(link("Pantalla de inicio", "home", "Free My TV u Original", "mode"));
             String services = Settings.Secure.getString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
             if (services != null && services.contains(c.getPackageName() + "/")) {
-                final Tile dlna = new Tile("Recibir videos", "play", null);
-                dlna.sub = Dlna.enabled(c) ? "DLNA prendido" : "DLNA apagado";
-                dlna.stay = () -> {
-                    boolean on = !Dlna.enabled(c);
-                    Dlna.setEnabled(c, on);
-                    dlna.sub = on ? "DLNA prendido" : "DLNA apagado";
-                    invalidate();
-                };
-                tiles.add(dlna);
-            }
-            // Over Home with a picture behind it: the next picture, seen changing behind the panel.
-            // Held: the next kind of picture (landscapes, art, favourites).
-            if (HomeActivity.shown && !Prefs.homeBackgroundShown(c).equals("black")) {
-                final Tile bg = new Tile("Fondo", "sync", null);
-                bg.sub = kindName(Prefs.homeBackgroundShown(c));   // the kind of picture (hold OK to change it)
-                bg.stay = () -> Prefs.skipHomeBackground(c);
-                // While a seasonal theme is on, the pictures are the theme's: no other kind to turn to.
-                if (!Gallery.photos(Prefs.seasonalTheme(c))) bg.hold = () -> {
-                    List<String> kinds = new ArrayList<>(java.util.Arrays.asList(Gallery.KINDS));
-                    if (Gallery.favorites(c).isEmpty()) kinds.remove(Gallery.FAVORITES);
-                    int at = kinds.indexOf(Prefs.homeBackground(c));
-                    String next = kinds.get((at + 1) % kinds.size());
-                    Prefs.setHomeBackground(c, next);
-                    bg.sub = kindName(next);
-                    invalidate();
-                };
-                tiles.add(bg);
+                more.add(toggle("Recibir videos (DLNA)", "play", () -> Dlna.enabled(c), () -> Dlna.setEnabled(c, !Dlna.enabled(c))));
             }
         }
 
-        /**
-         * Option B: sections with rows. Connections (Wi-Fi, Bluetooth with their switches), screen and sound (the
-         * sliders, the dark screensaver, picture and sound), then the shortcuts in two columns.
-         */
         private void arrangeTiles() {
-            java.util.List<Tile> rows = new ArrayList<>(), shortcuts = new ArrayList<>();
-            Tile dream = null, dark = null, picture = null, bright = null, volume = null;
-            for (Tile t : tiles) {
-                switch (t.title) {
-                    case "Protector": dream = t; break;
-                    case "Protector oscuro": dark = t; break;
-                    case "Imagen y sonido": picture = t; break;
-                    case "Brillo del inicio": bright = t; break;
-                    case "Volumen": volume = t; break;
-                    default: if (t != wifi && t != bluetooth) shortcuts.add(t);
-                }
-            }
-            wifi.line = bluetooth.line = true;
-            wifi.section = "CONEXIONES";
-            wifi.on = () -> wifiState;
-            bluetooth.on = () -> btState;
-            rows.add(wifi);
-            rows.add(bluetooth);
-            Tile firstScreen = bright != null ? bright : volume;
-            if (bright != null) rows.add(bright);
-            if (volume != null) rows.add(volume);
-            if (dark != null) {
-                dark.line = true;
-                final Context c = getContext();
-                dark.on = () -> DreamView.dark(c);
-                rows.add(dark);
-            }
-            if (picture != null) {
-                picture.line = true;
-                rows.add(picture);
-            }
-            if (firstScreen != null) firstScreen.section = "PANTALLA Y SONIDO";
-            if (dream != null) shortcuts.add(0, dream);
-            if (!shortcuts.isEmpty()) shortcuts.get(0).section = "ATAJOS";
             tiles.clear();
-            tiles.addAll(rows);
-            tiles.addAll(shortcuts);
-            // S2: the sections for the left column, each with its tiles for the right one.
-            sectNames.clear();
-            sectTiles.clear();
-            for (Tile tl : tiles) {
-                if (tl.section != null || sectTiles.isEmpty()) {
-                    String n = tl.section == null ? "AJUSTES" : tl.section;
-                    sectNames.add(n.charAt(0) + n.substring(1).toLowerCase(java.util.Locale.ROOT));
-                    sectTiles.add(new ArrayList<>());
-                }
-                sectTiles.get(sectTiles.size() - 1).add(tl);
-            }
-        }
-
-        /** S2: the sections (left column) and their tiles (right column); which side has the focus, and where. */
-        private final List<String> sectNames = new ArrayList<>();
-        private final List<List<Tile>> sectTiles = new ArrayList<>();
-        private int sect, side;   // side 0: the sections, 1: the section's tiles (focus is the tile's index in it)
-        private final String[] sectIcons = {"wifi", "sunny", "sparkles", "settings"};
-
-        private Tile curTile() {
-            List<Tile> l = sectTiles.get(sect);
-            return l.get(Math.max(0, Math.min(l.size() - 1, focus)));
+            for (List<Tile> l : sectTiles) tiles.addAll(l);
         }
 
         /**
@@ -392,7 +407,7 @@ public class QuickSettingsActivity extends Activity {
         boolean key(KeyEvent e) {
             if (closing) return true;   // on its way out
             if (e.getAction() != KeyEvent.ACTION_DOWN) {
-                if (isOk(e.getKeyCode()) && okPending) {   // a tile with a hold: a short press acts on release
+                if (isOk(e.getKeyCode()) && okPending) {   // a row with a hold: a short press acts on release
                     okPending = false;
                     if (!held) curTile().stay.run();
                     held = false;
@@ -401,7 +416,7 @@ public class QuickSettingsActivity extends Activity {
             }
             switch (e.getKeyCode()) {
                 case KeyEvent.KEYCODE_BACK:
-                    if (side == 1) side = 0;   // back to the sections
+                    if (side == 1) side = 0;   // back to the rail
                     else close();
                     break;
                 case KeyEvent.KEYCODE_DPAD_UP:
@@ -415,43 +430,30 @@ public class QuickSettingsActivity extends Activity {
                 case KeyEvent.KEYCODE_DPAD_RIGHT: {
                     int d = e.getKeyCode() == KeyEvent.KEYCODE_DPAD_RIGHT ? 1 : -1;
                     if (side == 0) {
-                        if (d > 0) {   // into the section's options
+                        if (d > 0) {
                             side = 1;
                             focus = 0;
                         }
                         break;
                     }
                     Tile cur = curTile();
-                    if (cur.wide) {   // a slider: ← → move it
-                        cur.adjust.accept(d);
-                        break;
-                    }
-                    if (d < 0) side = 0;   // ← back to the sections
+                    if (cur.wide) cur.adjust.accept(d);        // a slider moves
+                    else if (cur.cycle != null) cur.cycle.accept(d);   // a value steps
+                    else if (d < 0) side = 0;                   // ← back to the rail
                     break;
                 }
                 default:
                     if (!isOk(e.getKeyCode())) return false;
+                    if (e.getRepeatCount() > 0) return true;
                     if (side == 0) {
                         side = 1;
                         focus = 0;
                         break;
                     }
                     Tile tile = curTile();
-                    if (tile.hold != null) {
-                        if (e.getRepeatCount() == 0) {
-                            okPending = true;
-                            held = false;
-                        } else if ((e.isLongPress() || e.getRepeatCount() >= 8) && !held) {
-                            held = true;
-                            tile.hold.run();
-                        }
-                        return true;
-                    }
-                    if (e.getRepeatCount() > 0) return true;
                     if (tile.stay != null) tile.stay.run();
-                    else if (tile.wide) tile.stay.run();
-                    else tile.action.run();
-                    return true;
+                    else if (tile.action != null) tile.action.run();
+                    break;
             }
             invalidate();
             return true;
@@ -463,7 +465,7 @@ public class QuickSettingsActivity extends Activity {
 
         @Override
         protected void onDraw(Canvas c) {
-            float w = getWidth(), h = getHeight(), pw = 1184 * k;
+            float w = getWidth(), h = getHeight(), pw = 740 * k;
             // The scrim over what's behind, darker towards the panel.
             fill.setShader(new LinearGradient(w - pw - 300 * k, 0, w - pw, 0, 0x00000000, Ui.alpha(0x99000000, slide), Shader.TileMode.CLAMP));
             c.drawRect(0, 0, w, h, fill);
@@ -571,64 +573,80 @@ public class QuickSettingsActivity extends Activity {
             return y;
         }
 
-        private TextPaint colTitle, colName;
+        private TextPaint colTitle, railName, valuePaint;
 
-        /** S2: the sections on the left (a shade darker), the open one's options on the right as rows. */
+        /** U2: a rail of icons on the left (the sections), the open section's rows on the right. */
         private void drawColumns(Canvas c, float x0, float pw) {
             if (colTitle == null) {
-                colTitle = new TextPaint(Ui.text(Ui.displaySemibold, 38 * k, 0xFFFFFFFF));
-                colName = new TextPaint(Ui.text(Ui.medium, 26 * k, 0xFFFFFFFF));
+                colTitle = new TextPaint(Ui.text(Ui.displaySemibold, 36 * k, 0xFFFFFFFF));
+                railName = new TextPaint(Ui.text(Ui.medium, 17 * k, 0xFFFFFFFF));
+                railName.setTextAlign(Paint.Align.CENTER);
+                valuePaint = new TextPaint(Ui.text(Ui.regular, 21 * k, 0xCCFFFFFF));
+                valuePaint.setTextAlign(Paint.Align.RIGHT);
             }
-            float h = getHeight(), lx = x0 + 24 * k, lr = x0 + 424 * k;
-            fill.setShader(null);
-            fill.setColor(0x2E000000);
-            c.save();
-            c.clipRect(x0, 0, lr + 22 * k, h);
-            c.drawRoundRect(panelRect, 44 * k, 44 * k, fill);
-            c.restore();
-            c.drawText("Centro de control", lx + 20 * k, 104 * k, colTitle);
+            float h = getHeight();
+            float rl = x0 + 20 * k, rw = 124 * k;
             for (int i = 0; i < sectNames.size(); i++) {
-                r.set(lx, (150 + i * 96) * k, lr, (150 + i * 96 + 84) * k);
+                r.set(rl, (54 + i * 132) * k, rl + rw, (54 + i * 132 + 116) * k);
                 boolean f = side == 0 && i == sect;
+                fill.setShader(null);
                 if (f) {
                     fill.setColor(0xFFF5F5F7);
-                    c.drawRoundRect(r, 22 * k, 22 * k, fill);
+                    c.drawRoundRect(r, 26 * k, 26 * k, fill);
                 } else if (i == sect) {
                     fill.setColor(0x33FFFFFF);
-                    c.drawRoundRect(r, 22 * k, 22 * k, fill);
+                    c.drawRoundRect(r, 26 * k, 26 * k, fill);
                 }
                 int ink = f ? 0xFF1C1C1E : 0xF2FFFFFF;
-                drawGlyph(c, sectIcons[Math.min(i, sectIcons.length - 1)], r.left + 44 * k, r.centerY(), 13 * k, ink);
-                colName.setColor(ink);
-                c.drawText(sectNames.get(i), r.left + 84 * k, r.centerY() + Ui.halfCap(colName), colName);
+                drawGlyph(c, sectIcons.get(i), r.centerX(), r.top + 46 * k, 15 * k, ink);
+                railName.setColor(ink);
+                c.drawText(sectNames.get(i), r.centerX(), r.top + 96 * k, railName);
             }
-            // The right column: the section's name, then its options.
-            float rx = x0 + 470 * k, rr = x0 + pw - 48 * k;
+            fill.setColor(0x2EFFFFFF);
+            c.drawRect(x0 + 160 * k, 50 * k, x0 + 162 * k, h - 50 * k, fill);
+            // The section: its name, then its rows (scrolled so the focused one shows).
+            float cx = x0 + 186 * k, cr = x0 + pw - 34 * k;
             if (sectNames.isEmpty()) return;
-            c.drawText(sectNames.get(sect), rx + 6 * k, 104 * k, colTitle);
+            c.drawText(sectNames.get(sect), cx + 6 * k, 100 * k, colTitle);
             List<Tile> l = sectTiles.get(sect);
-            float y = 150 * k;
+            float top = 136 * k, bottom = h - 34 * k, y = top, scroll = 0;
+            for (int i = 0; i < l.size(); i++) {
+                float hh = (l.get(i).wide ? 70 : 84) * k;
+                if (side == 1 && i == focus && y + hh > bottom) scroll = y + hh - bottom;
+                y += hh + 12 * k;
+            }
+            c.save();
+            c.clipRect(cx - 12 * k, top - 10 * k, cr + 12 * k, bottom + 8 * k);
+            y = top - scroll;
             for (int i = 0; i < l.size(); i++) {
                 Tile t = l.get(i);
                 float hh = (t.wide ? 70 : 84) * k;
-                t.rect.set(rx, y, rr, y + hh);
+                t.rect.set(cx, y, cr, y + hh);
                 r.set(t.rect);
                 boolean on = side == 1 && focus == i;
                 if (t.wide) drawSlider(c, t, on);
                 else {
                     box(c, r, 22 * k, on);
                     int ink = on ? 0xFF1C1C1E : 0xEBFFFFFF;
-                    drawGlyph(c, t.symbol, r.left + 40 * k, r.centerY(), 13 * k, ink);
+                    drawGlyph(c, t.symbol, r.left + 38 * k, r.centerY(), 13 * k, ink);
                     title.setColor(on ? 0xFF1C1C1E : 0xFFFFFFFF);
                     sub.setColor(on ? 0x991C1C1E : 0x99FFFFFF);
-                    float tx = r.left + 80 * k, room = r.right - tx - (t.on != null ? 100 * k : 24 * k);
+                    float tx = r.left + 76 * k;
+                    String val = t.value != null ? "‹  " + t.value.get() + "  ›" : "";
+                    valuePaint.setColor(on ? 0xB31C1C1E : 0xCCFFFFFF);
+                    float rightRoom = t.on != null ? 100 * k : !val.isEmpty() ? valuePaint.measureText(val) + 40 * k
+                            : t.action != null ? 50 * k : 24 * k;
+                    float room = r.right - tx - rightRoom;
                     boolean two = t.sub != null && !t.sub.isEmpty();
                     c.drawText(fit(t.title, title, room), tx, two ? r.centerY() - 4 * k : r.centerY() + Ui.halfCap(title), title);
                     if (two) c.drawText(fit(t.sub, sub, room), tx, r.centerY() + 24 * k, sub);
                     if (t.on != null) drawSwitch(c, r.right - 26 * k, r.centerY(), t.on.getAsBoolean(), on);
+                    else if (!val.isEmpty()) c.drawText(val, r.right - 26 * k, r.centerY() + Ui.halfCap(valuePaint), valuePaint);
+                    else if (t.action != null) c.drawText("›", r.right - 26 * k, r.centerY() + Ui.halfCap(valuePaint), valuePaint);
                 }
-                y += hh + 14 * k;
+                y += hh + 12 * k;
             }
+            c.restore();
         }
 
         /** A switch with no colour: white with a dark knob when on, glass with a white knob when off. */
@@ -710,10 +728,18 @@ public class QuickSettingsActivity extends Activity {
                     o.inSampleSize = 8;
                     Bitmap mid = android.graphics.BitmapFactory.decodeFile(f.getPath(), o);
                     if (mid == null) return;
-                    Bitmap tiny = Bitmap.createScaledBitmap(mid, 40, 22, true);
-                    Bitmap up = Bitmap.createScaledBitmap(tiny, Backdrop.FW, Backdrop.FH, true);
+                    // A real blur at 192 × 108 (box blur, three passes): smooth when stretched, no blocks.
+                    Bitmap small = Bitmap.createScaledBitmap(mid, Backdrop.FW, Backdrop.FH, true);
                     mid.recycle();
-                    tiny.recycle();
+                    int fw = Backdrop.FW, fh = Backdrop.FH;
+                    int[] px = new int[fw * fh], tp = new int[fw * fh];
+                    small.getPixels(px, 0, fw, 0, 0, fw, fh);
+                    for (int pass = 0; pass < 3; pass++) {
+                        blurLine(px, tp, fw, fh, 6, true);
+                        blurLine(tp, px, fw, fh, 6, false);
+                    }
+                    Bitmap up = Bitmap.createBitmap(px, fw, fh, Bitmap.Config.ARGB_8888);
+                    small.recycle();
                     post(() -> {
                         blur = up;
                         blurPaint.setShader(new android.graphics.BitmapShader(up, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
@@ -723,6 +749,26 @@ public class QuickSettingsActivity extends Activity {
                     AppLog.w("quick settings glass: " + e.getMessage());
                 }
             }).start();
+        }
+
+        /** One box-blur pass along the rows or the columns (opaque pixels). */
+        private void blurLine(int[] in, int[] out, int w, int h, int r, boolean rows) {
+            int lines = rows ? h : w, len = rows ? w : h, div = 2 * r + 1;
+            for (int l = 0; l < lines; l++) {
+                int sr = 0, sg = 0, sb = 0;
+                for (int i = -r; i <= r; i++) {
+                    int q2 = Math.max(0, Math.min(len - 1, i)), p = in[rows ? l * w + q2 : q2 * w + l];
+                    sr += (p >> 16) & 255; sg += (p >> 8) & 255; sb += p & 255;
+                }
+                for (int i = 0; i < len; i++) {
+                    out[rows ? l * w + i : i * w + l] = 0xFF000000 | (sr / div) << 16 | (sg / div) << 8 | (sb / div);
+                    int ai = Math.min(len - 1, i + r + 1), si = Math.max(0, i - r);
+                    int ad = in[rows ? l * w + ai : ai * w + l], sd = in[rows ? l * w + si : si * w + l];
+                    sr += ((ad >> 16) & 255) - ((sd >> 16) & 255);
+                    sg += ((ad >> 8) & 255) - ((sd >> 8) & 255);
+                    sb += (ad & 255) - (sd & 255);
+                }
+            }
         }
 
         private void glassPanel(Canvas c, RectF r, float rad, float w, float h) {

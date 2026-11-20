@@ -53,6 +53,8 @@ public class SettingsActivity extends Activity {
         Ui.init(this);
         view = new SettingsView(this);
         setContentView(view);
+        String open = getIntent().getStringExtra("open");
+        if (open != null) view.openFrom(open);
     }
 
     @Override protected void onResume() {
@@ -604,8 +606,35 @@ public class SettingsActivity extends Activity {
             }
         }
 
+        /** Opened from the control center into one screen: Back there closes the settings (back to the panel's world). */
+        private boolean deep;
+
+        void openFrom(String what) {
+            deep = true;
+            switch (what) {
+                case "language": openPicker(PICK_LANGUAGE); break;
+                case "city": screen = HOME_SETTINGS; focus = CITY_ROW; break;
+                case "club": screen = HOME_SETTINGS; focus = CLUB_ROW; break;
+                case "backgrounds": screen = BACKGROUNDS; focus = 0; break;
+                case "shelf": openShelfEditor(); break;
+                case "keys":
+                    HomeMode.ensureRemoteService(getContext(), 0);
+                    loadApps();
+                    screen = REMOTE_KEYS;
+                    focus = 0;
+                    break;
+                case "mode": screen = HOME_CHOICE; focus = freeActive() ? 0 : 1; break;
+                default: deep = false;
+            }
+            invalidate();
+        }
+
         boolean onKey(KeyEvent e) {
             boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
+            if (deep && e.getKeyCode() == KeyEvent.KEYCODE_BACK && screen != PICKER) {
+                if (!down) activity.finish();
+                return true;
+            }
             switch (e.getKeyCode()) {
                 case KeyEvent.KEYCODE_DPAD_UP:
                     if (down && focus > 0) focus--;

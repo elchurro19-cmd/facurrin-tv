@@ -2885,11 +2885,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         HomeApps.Item browser = null;
         for (HomeApps.Item it : HomeApps.drawerShortcuts(c)) {
             if (it.kind == HomeApps.ALL_APPS) it.label = "Todas las apps";
-            if (it.kind == HomeApps.ANDROID_SETTINGS) it.label = "Ajustes de la TV";
+            if (it.kind == HomeApps.ANDROID_SETTINGS) continue;   // in the control center now (Más)
             if (it.kind == HomeApps.APP) browser = it;
             else list.add(it);
         }
-        if (!HomeApps.allInputs(c).isEmpty()) list.add(HomeApps.action(HomeApps.INPUTS, "inputs", "Entradas", "hdmi"));
+        // (Entradas: in the control center now)
         if (browser != null) list.add(browser);
         list.add(HomeApps.action(HEART_KIND, "heart", "Guardar fondo", "sparkles"));
         // Two circles at the end: the team (its crest only) and the weather (OK opens its panel).
