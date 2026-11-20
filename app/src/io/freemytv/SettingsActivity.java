@@ -115,9 +115,13 @@ public class SettingsActivity extends Activity {
     static final class SettingsView extends View implements Choreographer.FrameCallback {
         private static final int MAIN = 0, HOME_CHOICE = 1, HOME_SETTINGS = 2, REMOTE_KEYS = 3, PICKER = 4, SHELF_EDIT = 5,
                 BACKGROUNDS = 6;
-        private static final float LIST_ROW_H = 68, LIST_ROW_GAP = 6;
+        private static final float LIST_ROW_H = 64, LIST_ROW_GAP = 6;   // 11 rows fit inside the panel
         private static final int PICK_VISIBLE = 9;
-        private static final float LIST_X = 1000, LIST_R = 1824, LIST_TOP = 186, ROW_H = 74, ROW_GAP = 8, CHOICE_H = 104;
+        private static final float LIST_X = 1170, LIST_R = 1848, LIST_TOP = 196, ROW_H = 74, ROW_GAP = 8, CHOICE_H = 104;
+        /** S2: a wide glass panel on the right; the sections in its left column, the chosen one's options on its right. */
+        private static final float PANEL_L = 700, PANEL_T = 36, PANEL_R = 1884, PANEL_B = 1044, SECT_X = 724, SECT_R = 1124,
+                SECT_TOP = 150, SECT_H = 84, SECT_STEP = 96;
+        private static final String[] SECT_ICONS = {"home", "bedtime", "settings", "sunrise", "apps", "gamepad", "tv_settings"};
         private static final int AMBER = 0xFFFFC266, INK = 0xFF1C1C1E;
 
         private final SettingsActivity activity;
@@ -250,8 +254,8 @@ public class SettingsActivity extends Activity {
         private RectF rowBox(int row) {
             float top, height;
             if (screen == MAIN) {
-                top = LIST_TOP + row * (ROW_H + ROW_GAP);
-                height = ROW_H;
+                focusBox.set(SECT_X * k, (SECT_TOP + row * SECT_STEP) * k, SECT_R * k, (SECT_TOP + row * SECT_STEP + SECT_H) * k);
+                return focusBox;
             } else if (screen == HOME_CHOICE) {
                 top = LIST_TOP + 20 + row * (CHOICE_H + ROW_GAP);
                 height = CHOICE_H;
@@ -363,16 +367,127 @@ public class SettingsActivity extends Activity {
             scene.drawBackground(c);
 
             // On the left: big symbol, title, description.
-            float cx = 500 * k;
-            Symbols.draw(getContext(), c, "sparkles", cx, 400 * k, 150 * k, 0xEBFFFFFF);
-            c.drawText("Free My TV Glass", cx, 612 * k, title);
-            c.drawText("Tu inicio de vidrio, a tu manera", cx, 660 * k, subtitle);
-            c.drawText(versionName(getContext()), cx, 704 * k, version);
+            float cx = 350 * k;
+            Symbols.draw(getContext(), c, "sparkles", cx, 400 * k, 130 * k, 0xEBFFFFFF);
+            c.drawText("Free My TV Glass", cx, 600 * k, title);
+            c.drawText("Tu inicio de vidrio, a tu manera", cx, 648 * k, subtitle);
+            c.drawText(versionName(getContext()), cx, 692 * k, version);
+            // The panel: glass, its left column a shade darker.
+            tmp.set(PANEL_L * k, PANEL_T * k, PANEL_R * k, PANEL_B * k);
+            scene.glass(c, tmp, 44 * k, 0xFFFFFFFF, 0.5f, 0, 0, 0.02f, 1, 1);
+            c.save();
+            c.clipRect(PANEL_L * k, PANEL_T * k, (SECT_R + 22) * k, PANEL_B * k);
+            white.setAlpha(255);
+            sectionShade.setColor(0x2E000000);
+            c.drawRoundRect(tmp, 44 * k, 44 * k, sectionShade);
+            c.restore();
+            drawSections(c, seconds);
 
             if (screen == MAIN) drawMain(c, seconds); else if (screen == HOME_CHOICE) drawChoice(c); else if (screen == PICKER) drawPicker(c); else if (screen == SHELF_EDIT) drawShelfEditor(c); else drawList(c);
         }
 
+        private final Paint sectionShade = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private Paint sectTitle, sectName, sectSub, previewText;
+
+        private String[] sectionNames() {
+            return new String[] {Ui.tr("Home Screen"), Ui.tr("Screensaver"), Ui.tr("Home Settings"), "Fondos", Ui.tr("Shelf"),
+                    Ui.tr("Remote Buttons"), Ui.tr("TV Settings")};
+        }
+
+        /** Which section a screen belongs to (its row on the left). */
+        private int sectionOf(int sc) {
+            switch (sc) {
+                case HOME_CHOICE: return 0;
+                case HOME_SETTINGS: return pickFor == PICK_CITY || pickFor == PICK_LANGUAGE || screen != PICKER ? 2 : 5;
+                case BACKGROUNDS: return 3;
+                case SHELF_EDIT: return 4;
+                case REMOTE_KEYS: return 5;
+                case PICKER: return pickFor == PICK_CITY || pickFor == PICK_LANGUAGE ? 2 : 5;
+                default: return -1;
+            }
+        }
+
+        /** S2's left column: "Ajustes" and the sections, each with its symbol; the one open is lit. */
+        private void drawSections(Canvas c, float seconds) {
+            if (sectTitle == null) {
+                sectTitle = Ui.text(Ui.displaySemibold, 40 * k, 0xFFFFFFFF);
+                sectName = Ui.text(Ui.medium, 26 * k, 0xF2FFFFFF);
+                sectSub = Ui.text(Ui.regular, 19 * k, 0x99FFFFFF);
+                previewText = Ui.text(Ui.regular, 25 * k, 0xB3FFFFFF);
+            }
+            c.drawText(Ui.tr("Settings"), (SECT_X + 20) * k, 112 * k, sectTitle);
+            String[] names = sectionNames();
+            int open = screen == MAIN ? -1 : sectionOf(screen);
+            boolean working = busy();
+            for (int i = 0; i < names.length; i++) {
+                rowRect.set(SECT_X * k, (SECT_TOP + i * SECT_STEP) * k, SECT_R * k, (SECT_TOP + i * SECT_STEP + SECT_H) * k);
+                float f = 0;
+                if (screen == MAIN) f = drawRowBackground(c, i);
+                else if (i == open) {
+                    sectionShade.setColor(0x38FFFFFF);
+                    c.drawRoundRect(rowRect, 20 * k, 20 * k, sectionShade);
+                }
+                int ink = blend(0xF2FFFFFF, INK, f);
+                Symbols.draw(getContext(), c, SECT_ICONS[i], rowRect.left + 44 * k, rowRect.centerY(), 30 * k, ink);
+                sectName.setColor(ink);
+                String sub = i == 0 ? (working ? (busyText().isEmpty() ? Ui.tr("Starting…") : busyText()) : freeActive() ? "Free My TV" : Ui.tr("Original"))
+                        : i == 1 ? Ui.tr("Preview") : "";
+                if (sub.isEmpty()) {
+                    c.drawText(names[i], rowRect.left + 84 * k, rowRect.centerY() + Ui.halfCap(sectName), sectName);
+                } else {
+                    c.drawText(names[i], rowRect.left + 84 * k, rowRect.centerY() - 4 * k, sectName);
+                    sectSub.setColor(blend(0x99FFFFFF, 0x991C1C1E, f));
+                    String shown = TextUtils.ellipsize(sub, new TextPaint(sectSub), (SECT_R - SECT_X - 110) * k, TextUtils.TruncateAt.END).toString();
+                    c.drawText(shown, rowRect.left + 84 * k, rowRect.centerY() + 24 * k, sectSub);
+                    if (i == 0 && working) {
+                        spinner.setColor(ink);
+                        Ui.spinner(c, rowRect.right - 34 * k, rowRect.centerY(), 12 * k, seconds * 1.3f, spinner);
+                    }
+                }
+            }
+        }
+
+        /** On the main screen, the right column shows the focused section as it is (OK or → goes in). */
         private void drawMain(Canvas c, float seconds) {
+            Paint heading = Ui.text(Ui.displaySemibold, 34 * k, 0xFFFFFFFF);
+            String[] names = sectionNames();
+            int at = Math.max(0, Math.min(names.length - 1, focus));
+            c.drawText(names[at], LIST_X * k + 30 * k, (LIST_TOP - 24) * k, heading);
+            if (at == 2 || at == 3 || at == 5) {   // the rows themselves, quiet (not focused)
+                drawRows(c, at == 2 ? HOME_SETTINGS : at == 3 ? BACKGROUNDS : REMOTE_KEYS, true);
+            } else {
+                String[] about = {"Free My TV o la pantalla de inicio original de la tele.", "OK muestra el protector de pantalla ahora.", "",
+                        "", "Qué apps van en la barra y en qué orden.", "", "Abre los ajustes de Android TV: imagen, sonido, red."};
+                c.drawText(about[at], LIST_X * k + 30 * k, (LIST_TOP + 40) * k, previewText);
+                c.drawText("OK o → para entrar", LIST_X * k + 30 * k, (LIST_TOP + 84) * k, rowSub);
+            }
+            if (at == 0) drawModeNotes(c);
+        }
+
+        /** Under "Pantalla de inicio": what the switch is doing, or its last error. */
+        private void drawModeNotes(Canvas c) {
+            boolean working = busy();
+            String busyText = busyText();
+            float y = (LIST_TOP + 150) * k;
+            String error = state.optString("error");
+            if (working && busyText.equals(Ui.tr("Accept “Allow USB debugging?” on the TV (tick “Always allow”)."))) {
+                c.drawText(Ui.tr("On the TV: tick “Always allow” and press OK."), LIST_X * k + 30 * k, y, warn);
+            } else if (!working && !error.isEmpty()) {
+                int width = Math.round(620 * k);
+                if (errorLayout == null || !error.equals(errorShown) || errorLayout.getWidth() != width) {
+                    errorShown = error;
+                    errorLayout = StaticLayout.Builder.obtain(error, 0, error.length(), new TextPaint(warn), width)
+                            .setMaxLines(6).setEllipsize(TextUtils.TruncateAt.END).build();
+                }
+                c.save();
+                c.translate(LIST_X * k + 30 * k, y - errorLayout.getLineBaseline(0));
+                errorLayout.draw(c);
+                c.restore();
+            }
+        }
+
+        /** The old single-column main list (kept for reference; S2 draws the sections instead). */
+        private void drawMainOld(Canvas c, float seconds) {
             boolean working = busy();
             String busyText = busyText();
             String mode = freeActive() ? "Free My TV" : Ui.tr("Original");
@@ -506,6 +621,10 @@ public class SettingsActivity extends Activity {
                     return true;
                 case KeyEvent.KEYCODE_DPAD_LEFT:
                 case KeyEvent.KEYCODE_DPAD_RIGHT:
+                    if (down && screen == MAIN && e.getKeyCode() == KeyEvent.KEYCODE_DPAD_RIGHT && e.getRepeatCount() == 0) {
+                        activate();   // S2: → opens the section on the right
+                        return true;
+                    }
                     if (down && screen == SHELF_EDIT) {
                         moveShelfApp(e.getKeyCode() == KeyEvent.KEYCODE_DPAD_RIGHT ? 1 : -1);
                         invalidate();
@@ -999,16 +1118,20 @@ public class SettingsActivity extends Activity {
         }
 
         private void drawList(Canvas c) {
-            boolean keys = screen == REMOTE_KEYS, backgrounds = screen == BACKGROUNDS;
+            drawRows(c, screen, false);
+        }
+
+        private void drawRows(Canvas c, int which, boolean preview) {
+            boolean keys = which == REMOTE_KEYS, backgrounds = which == BACKGROUNDS;
             String[] labels = keys ? keyLabels() : backgrounds ? backgroundLabels() : settingLabels();
             String[] values = keys ? keyValues() : backgrounds ? backgroundValues() : settingValues();
             Paint heading = Ui.text(Ui.displaySemibold, 34 * k, 0xFFFFFFFF);
-            c.drawText(keys ? Ui.tr("Remote Buttons") : backgrounds ? "Fondos" : Ui.tr("Home Settings"),
+            if (!preview) c.drawText(keys ? Ui.tr("Remote Buttons") : backgrounds ? "Fondos" : Ui.tr("Home Settings"),
                     LIST_X * k + 30 * k, (LIST_TOP - 24) * k, heading);
             for (int i = 0; i < labels.length; i++) {
                 float y = (LIST_TOP + 20 + i * (LIST_ROW_H + LIST_ROW_GAP)) * k;
                 rowRect.set(LIST_X * k, y, LIST_R * k, y + LIST_ROW_H * k);
-                float f = drawRowBackground(c, i);
+                float f = preview ? 0 : drawRowBackground(c, i);
                 rowLabel.setColor(blend(0xF2FFFFFF, INK, f));
                 boolean locked = !keys && (i == CLUB_ROW || i == NATION_ROW) && !Prefs.futbol();
                 rowValue.setColor(blend(locked ? 0x59FFFFFF : 0xB3FFFFFF, locked ? 0x591C1C1E : 0xB31C1C1E, f));
@@ -1019,6 +1142,10 @@ public class SettingsActivity extends Activity {
             }
             Paint hint = Ui.text(Ui.regular, 23 * k, 0x8CFFFFFF);
             float hy = (LIST_TOP + 20 + labels.length * (LIST_ROW_H + LIST_ROW_GAP) + 36) * k;
+            if (preview) {
+                c.drawText("OK o → para entrar", LIST_X * k + 30 * k, hy, hint);
+                return;
+            }
             c.drawText(Ui.tr("OK or the arrows change the value."), LIST_X * k + 30 * k, hy, hint);
             if (backgrounds) c.drawText("En el protector: ↑ favorita · ↓ cambiar fondos · ← → otra foto.", LIST_X * k + 30 * k, hy + 38 * k, hint);
             if (keys) {
