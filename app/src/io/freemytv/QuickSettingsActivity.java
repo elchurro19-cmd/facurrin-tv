@@ -278,6 +278,28 @@ public class QuickSettingsActivity extends Activity {
             tiles.clear();
             tiles.addAll(rows);
             tiles.addAll(shortcuts);
+            // S2: the sections for the left column, each with its tiles for the right one.
+            sectNames.clear();
+            sectTiles.clear();
+            for (Tile tl : tiles) {
+                if (tl.section != null || sectTiles.isEmpty()) {
+                    String n = tl.section == null ? "AJUSTES" : tl.section;
+                    sectNames.add(n.charAt(0) + n.substring(1).toLowerCase(java.util.Locale.ROOT));
+                    sectTiles.add(new ArrayList<>());
+                }
+                sectTiles.get(sectTiles.size() - 1).add(tl);
+            }
+        }
+
+        /** S2: the sections (left column) and their tiles (right column); which side has the focus, and where. */
+        private final List<String> sectNames = new ArrayList<>();
+        private final List<List<Tile>> sectTiles = new ArrayList<>();
+        private int sect, side;   // side 0: the sections, 1: the section's tiles (focus is the tile's index in it)
+        private final String[] sectIcons = {"wifi", "sunny", "sparkles", "settings"};
+
+        private Tile curTile() {
+            List<Tile> l = sectTiles.get(sect);
+            return l.get(Math.max(0, Math.min(l.size() - 1, focus)));
         }
 
         /**
@@ -372,47 +394,49 @@ public class QuickSettingsActivity extends Activity {
             if (e.getAction() != KeyEvent.ACTION_DOWN) {
                 if (isOk(e.getKeyCode()) && okPending) {   // a tile with a hold: a short press acts on release
                     okPending = false;
-                    if (!held) tiles.get(focus).stay.run();
+                    if (!held) curTile().stay.run();
                     held = false;
                 }
                 return e.getKeyCode() == KeyEvent.KEYCODE_BACK || isOk(e.getKeyCode());
             }
-            int t = tiles.size();
             switch (e.getKeyCode()) {
                 case KeyEvent.KEYCODE_BACK:
-                    close();
-                    return true;
+                    if (side == 1) side = 0;   // back to the sections
+                    else close();
+                    break;
                 case KeyEvent.KEYCODE_DPAD_UP:
                 case KeyEvent.KEYCODE_DPAD_DOWN: {
-                    // By rows (a slider is a row of its own): to the nearest tile of the row above or below.
-                    int row = tiles.get(focus).row + (e.getKeyCode() == KeyEvent.KEYCODE_DPAD_DOWN ? 1 : -1);
-                    float cx = tiles.get(focus).rect.centerX(), best = Float.MAX_VALUE;
-                    for (int i = 0; i < t; i++) {
-                        Tile o = tiles.get(i);
-                        if (o.row != row) continue;
-                        float d = Math.abs(o.rect.centerX() - cx);
-                        if (d < best) {
-                            best = d;
-                            focus = i;
-                        }
-                    }
+                    int d = e.getKeyCode() == KeyEvent.KEYCODE_DPAD_DOWN ? 1 : -1;
+                    if (side == 0) sect = Math.max(0, Math.min(sectNames.size() - 1, sect + d));
+                    else focus = Math.max(0, Math.min(sectTiles.get(sect).size() - 1, focus + d));
                     break;
                 }
                 case KeyEvent.KEYCODE_DPAD_LEFT:
                 case KeyEvent.KEYCODE_DPAD_RIGHT: {
                     int d = e.getKeyCode() == KeyEvent.KEYCODE_DPAD_RIGHT ? 1 : -1;
-                    Tile cur = tiles.get(focus);
+                    if (side == 0) {
+                        if (d > 0) {   // into the section's options
+                            side = 1;
+                            focus = 0;
+                        }
+                        break;
+                    }
+                    Tile cur = curTile();
                     if (cur.wide) {   // a slider: ← → move it
                         cur.adjust.accept(d);
                         break;
                     }
-                    int next = focus + d;
-                    if (next >= 0 && next < t && tiles.get(next).row == cur.row) focus = next;
+                    if (d < 0) side = 0;   // ← back to the sections
                     break;
                 }
                 default:
                     if (!isOk(e.getKeyCode())) return false;
-                    Tile tile = tiles.get(focus);
+                    if (side == 0) {
+                        side = 1;
+                        focus = 0;
+                        break;
+                    }
+                    Tile tile = curTile();
                     if (tile.hold != null) {
                         if (e.getRepeatCount() == 0) {
                             okPending = true;
@@ -425,6 +449,7 @@ public class QuickSettingsActivity extends Activity {
                     }
                     if (e.getRepeatCount() > 0) return true;
                     if (tile.stay != null) tile.stay.run();
+                    else if (tile.wide) tile.stay.run();
                     else tile.action.run();
                     return true;
             }
@@ -438,7 +463,7 @@ public class QuickSettingsActivity extends Activity {
 
         @Override
         protected void onDraw(Canvas c) {
-            float w = getWidth(), h = getHeight(), pw = 600 * k;
+            float w = getWidth(), h = getHeight(), pw = 1184 * k;
             // The scrim over what's behind, darker towards the panel.
             fill.setShader(new LinearGradient(w - pw - 300 * k, 0, w - pw, 0, 0x00000000, Ui.alpha(0x99000000, slide), Shader.TileMode.CLAMP));
             c.drawRect(0, 0, w, h, fill);
@@ -446,9 +471,7 @@ public class QuickSettingsActivity extends Activity {
             float x0 = w - pw * slide;
             panelRect.set(x0, 0, x0 + pw + 60 * k, h);
             glassPanel(c, panelRect, 44 * k, w, h);
-            float x = x0 + 48 * k, right = x0 + pw - 48 * k;
-            // Option B: no clock or weather (the home shows them); the sections from the top.
-            drawTiles(c, x, right, 64 * k);
+            drawColumns(c, x0, pw);
             // The home screen's brightness applies to the panel too (only over it: the home behind is already dimmed).
             int dim = Prefs.launcherDim(getContext());
             if (dim > 0) {
@@ -546,6 +569,66 @@ public class QuickSettingsActivity extends Activity {
                 if (t.on != null) drawSwitch(c, r.right - 24 * k, r.centerY(), t.on.getAsBoolean(), on);
             }
             return y;
+        }
+
+        private TextPaint colTitle, colName;
+
+        /** S2: the sections on the left (a shade darker), the open one's options on the right as rows. */
+        private void drawColumns(Canvas c, float x0, float pw) {
+            if (colTitle == null) {
+                colTitle = new TextPaint(Ui.text(Ui.displaySemibold, 38 * k, 0xFFFFFFFF));
+                colName = new TextPaint(Ui.text(Ui.medium, 26 * k, 0xFFFFFFFF));
+            }
+            float h = getHeight(), lx = x0 + 24 * k, lr = x0 + 424 * k;
+            fill.setShader(null);
+            fill.setColor(0x2E000000);
+            c.save();
+            c.clipRect(x0, 0, lr + 22 * k, h);
+            c.drawRoundRect(panelRect, 44 * k, 44 * k, fill);
+            c.restore();
+            c.drawText("Centro de control", lx + 20 * k, 104 * k, colTitle);
+            for (int i = 0; i < sectNames.size(); i++) {
+                r.set(lx, (150 + i * 96) * k, lr, (150 + i * 96 + 84) * k);
+                boolean f = side == 0 && i == sect;
+                if (f) {
+                    fill.setColor(0xFFF5F5F7);
+                    c.drawRoundRect(r, 22 * k, 22 * k, fill);
+                } else if (i == sect) {
+                    fill.setColor(0x33FFFFFF);
+                    c.drawRoundRect(r, 22 * k, 22 * k, fill);
+                }
+                int ink = f ? 0xFF1C1C1E : 0xF2FFFFFF;
+                drawGlyph(c, sectIcons[Math.min(i, sectIcons.length - 1)], r.left + 44 * k, r.centerY(), 13 * k, ink);
+                colName.setColor(ink);
+                c.drawText(sectNames.get(i), r.left + 84 * k, r.centerY() + Ui.halfCap(colName), colName);
+            }
+            // The right column: the section's name, then its options.
+            float rx = x0 + 470 * k, rr = x0 + pw - 48 * k;
+            if (sectNames.isEmpty()) return;
+            c.drawText(sectNames.get(sect), rx + 6 * k, 104 * k, colTitle);
+            List<Tile> l = sectTiles.get(sect);
+            float y = 150 * k;
+            for (int i = 0; i < l.size(); i++) {
+                Tile t = l.get(i);
+                float hh = (t.wide ? 70 : 84) * k;
+                t.rect.set(rx, y, rr, y + hh);
+                r.set(t.rect);
+                boolean on = side == 1 && focus == i;
+                if (t.wide) drawSlider(c, t, on);
+                else {
+                    box(c, r, 22 * k, on);
+                    int ink = on ? 0xFF1C1C1E : 0xEBFFFFFF;
+                    drawGlyph(c, t.symbol, r.left + 40 * k, r.centerY(), 13 * k, ink);
+                    title.setColor(on ? 0xFF1C1C1E : 0xFFFFFFFF);
+                    sub.setColor(on ? 0x991C1C1E : 0x99FFFFFF);
+                    float tx = r.left + 80 * k, room = r.right - tx - (t.on != null ? 100 * k : 24 * k);
+                    boolean two = t.sub != null && !t.sub.isEmpty();
+                    c.drawText(fit(t.title, title, room), tx, two ? r.centerY() - 4 * k : r.centerY() + Ui.halfCap(title), title);
+                    if (two) c.drawText(fit(t.sub, sub, room), tx, r.centerY() + 24 * k, sub);
+                    if (t.on != null) drawSwitch(c, r.right - 26 * k, r.centerY(), t.on.getAsBoolean(), on);
+                }
+                y += hh + 14 * k;
+            }
         }
 
         /** A switch with no colour: white with a dark knob when on, glass with a white knob when off. */
