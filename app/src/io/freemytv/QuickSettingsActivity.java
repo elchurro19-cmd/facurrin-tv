@@ -79,6 +79,7 @@ public class QuickSettingsActivity extends Activity {
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
         if (panel.editing) {   // typing the city: the keys are the field's (Back leaves it)
+            if (e.getKeyCode() == KeyEvent.KEYCODE_DPAD_DOWN && e.getAction() == KeyEvent.ACTION_DOWN && panel.downFromField()) return true;
             if (e.getKeyCode() == KeyEvent.KEYCODE_BACK) {
                 if (e.getAction() == KeyEvent.ACTION_UP) panel.stopEditing();
                 return true;
@@ -284,7 +285,7 @@ public class QuickSettingsActivity extends Activity {
             };
             bright.stay = () -> { };
             quick.add(bright);
-            final android.media.AudioManager audio = c.getSystemService(android.media.AudioManager.class);
+            final android.media.AudioManager audio = null;   // no volume bar: the remote's buttons do it
             if (audio != null) {
                 final Tile volume = new Tile("Volumen", "speaker", null);
                 volume.wide = true;
@@ -351,12 +352,12 @@ public class QuickSettingsActivity extends Activity {
             final Tile clubT = new Tile("Club favorito", "ball", null);
             clubT.opens = true;
             clubT.value = () -> !Prefs.clubName().isEmpty() ? Prefs.clubName() : clubNames[SettingsActivity.SettingsView.indexOf(clubs, Prefs.club())];
-            clubT.stay = () -> askText("Club favorito", "Escribí el nombre del club y apretá Buscar", text -> searchTeam(text, false));
+            clubT.stay = () -> askLive("Club favorito", "Escribí el club (aparecen mientras escribís)", false);
             home.add(clubT);
             final Tile nationT = new Tile("Selección", "ball", null);
             nationT.opens = true;
             nationT.value = () -> !Prefs.nationName().isEmpty() ? Prefs.nationName() : nationNames[SettingsActivity.SettingsView.indexOf(nations, Prefs.nation())];
-            nationT.stay = () -> askText("Selección", "Escribí el país y apretá Buscar", text -> searchTeam(text, true));
+            nationT.stay = () -> askLive("Selección", "Escribí el país (aparecen mientras escribís)", true);
             home.add(nationT);
 
             // Fondos: what's behind the home screen and the screensaver.
@@ -436,7 +437,10 @@ public class QuickSettingsActivity extends Activity {
         private Tile editTile;
         private java.util.function.Consumer<String> editThen;
 
+        private boolean liveMode;
+
         private void askCity(final Tile cityTile) {
+            liveMode = false;
             editTile = cityTile;
             askText("Ciudad", "Escribí tu ciudad y apretá Buscar", text -> searchCity(text, cityTile));
         }
@@ -464,6 +468,11 @@ public class QuickSettingsActivity extends Activity {
             cityField.setVisibility(View.VISIBLE);
             cityField.setOnEditorActionListener((v, act, ev) -> {
                 String text = cityField.getText().toString();
+                if (liveMode) {   // a team: "Buscar" just searches now; the matches are already under the box
+                    removeCallbacks(liveRun);
+                    liveSearch(text);
+                    return true;
+                }
                 stopEditing();
                 if (editThen != null) editThen.accept(text);
                 return true;
@@ -483,6 +492,119 @@ public class QuickSettingsActivity extends Activity {
             if (im != null) im.hideSoftInputFromWindow(cityField.getWindowToken(), 0);
             cityField.setVisibility(View.GONE);
             closeSub();
+        }
+
+        /** Typing a team: the box on top, the matches under it as the letters come (ESPN), ↓ goes down to them. */
+        private boolean liveNation;
+        private final Runnable liveRun = () -> liveSearch(cityField.getText().toString());
+        private android.text.TextWatcher liveWatch;
+
+        private void askLive(String title, String hint, boolean nation) {
+            liveNation = nation;
+            askText(title, hint, text -> liveSearch(text));
+            liveMode = true;
+            if (liveWatch == null) {
+                liveWatch = new android.text.TextWatcher() {
+                    @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
+                    @Override public void onTextChanged(CharSequence s, int a, int b, int c) { }
+                    @Override public void afterTextChanged(android.text.Editable s) {
+                        if (!editing || editThen == null) return;
+                        removeCallbacks(liveRun);
+                        postDelayed(liveRun, 350);
+                    }
+                };
+                cityField.addTextChangedListener(liveWatch);
+            }
+        }
+
+        /** The matches for what's typed: the Liga's clubs (or South America's teams) by their name at once, then ESPN's. */
+        private void liveSearch(final String text) {
+            final String q2 = text.trim();
+            if (subList == null || q2.isEmpty()) return;
+            final boolean nation = liveNation;
+            final List<String[]> local = new ArrayList<>();
+            String[][] mine = nation ? SettingsActivity.SettingsView.NATIONS : SettingsActivity.SettingsView.CLUBS;
+            String low = q2.toLowerCase(java.util.Locale.ROOT);
+            for (String[] t : mine) if (t[1].toLowerCase(java.util.Locale.ROOT).contains(low)) local.add(new String[] {t[0], t[1], ""});
+            showMatches(local, nation);
+            if (q2.length() < 3) return;
+            new Thread(() -> {
+                final List<String[]> found = new ArrayList<>(local);
+                try {
+                    java.net.HttpURLConnection con = (java.net.HttpURLConnection) new java.net.URL(
+                            "https://site.web.api.espn.com/apis/common/v3/search?type=team&limit=20&query="
+                                    + java.net.URLEncoder.encode(q2, "UTF-8")).openConnection();
+                    con.setConnectTimeout(8000);
+                    con.setReadTimeout(8000);
+                    StringBuilder sb = new StringBuilder();
+                    try (java.io.BufferedReader rd = new java.io.BufferedReader(new java.io.InputStreamReader(con.getInputStream(), "UTF-8"))) {
+                        for (String line; (line = rd.readLine()) != null; ) sb.append(line);
+                    }
+                    org.json.JSONArray items = new org.json.JSONObject(sb.toString()).optJSONArray("items");
+                    for (int i = 0; items != null && i < items.length(); i++) {
+                        org.json.JSONObject o = items.optJSONObject(i);
+                        if (o == null || !"soccer".equals(o.optString("sport"))) continue;
+                        boolean dup = false;
+                        for (String[] f : found) dup |= f[0].equals(o.optString("id"));
+                        if (!dup) found.add(new String[] {o.optString("id"), o.optString("displayName"), o.optString("league")});
+                    }
+                } catch (Exception e) {
+                    AppLog.w("team search: " + e.getMessage());
+                }
+                post(() -> {
+                    if (q2.equals(cityField.getText().toString().trim()) || !editing) showMatches(found, nation);
+                });
+            }).start();
+        }
+
+        /** The box stays first; the matches follow it. */
+        private void showMatches(List<String[]> found, final boolean nation) {
+            if (subList == null || subList.isEmpty()) return;
+            Tile box = subList.get(0);
+            List<Tile> list = new ArrayList<>();
+            list.add(box);
+            for (final String[] tm : found) {
+                Tile t = new Tile(tm[1], "ball", null);
+                t.sub = tm[2].isEmpty() ? "" : tm[2].toUpperCase(java.util.Locale.ROOT);
+                t.stay = () -> {
+                    if (nation) {
+                        Prefs.setNation(tm[0]);
+                        Prefs.setNationName(tm[1]);
+                    } else {
+                        Prefs.setClub(tm[0]);
+                        Prefs.setClubName(tm[1]);
+                    }
+                    changed();
+                    leaveField();
+                    closeSub();
+                };
+                list.add(t);
+            }
+            subList = list;
+            invalidate();
+        }
+
+        /** Down from the box to the matches: the keyboard goes, what was typed stays written in the box. */
+        boolean downFromField() {
+            if (!editing || subList == null || subList.size() < 2) return false;
+            leaveField();
+            focus = 1;
+            invalidate();
+            return true;
+        }
+
+        private void leaveField() {
+            if (!editing) return;
+            editing = false;
+            if (subList != null && !subList.isEmpty()) {
+                Tile box = subList.get(0);
+                String typed = cityField.getText().toString();
+                subList.set(0, new Tile(typed.isEmpty() ? " " : typed, "search", null));
+                subList.get(0).stay = () -> { };
+            }
+            android.view.inputmethod.InputMethodManager im = getContext().getSystemService(android.view.inputmethod.InputMethodManager.class);
+            if (im != null) im.hideSoftInputFromWindow(cityField.getWindowToken(), 0);
+            cityField.setVisibility(View.GONE);
         }
 
         /** Any football team by name (ESPN's search): the matches listed; OK makes it the club (or the team). */
