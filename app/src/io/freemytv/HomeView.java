@@ -121,11 +121,22 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private boolean wxOpen, wxWas;
     /** The drawer under the bar (D2): wide buttons; Entradas unfolds the inputs in place, the team its card. */
     private static final int TEAM_KIND = 30, WX_KIND = 31;
+    /** The heart (saves the background on screen) and "Mis fondos" (the saved ones, to pick one). */
+    private static final int HEART_KIND = 32, FAVS_KIND = 33;
+    private static final int Z_FAVS = 17;
+    private boolean heartOn;
+    private int favCount, favIndex;
+    private List<Gallery.Item> favs = new ArrayList<>();
+    private final java.util.Map<String, Bitmap> favThumbs = new java.util.HashMap<>();
+    private final RectF favsCard = new RectF();
+    private TextPaint favHead, favEmpty;
+    private final android.graphics.Path heartPath = new android.graphics.Path();
+    private Paint heartStroke;
     private static final float CLOCK_LIFT = 56;   // the clock block, up from the bar
     private final RectF weekCard = new RectF();
 
     private static boolean circle(HomeApps.Item it) {
-        return it.kind == TEAM_KIND || it.kind == WX_KIND;
+        return it.kind == TEAM_KIND || it.kind == WX_KIND || it.kind == HEART_KIND;
     }
     private int drawerPanel;   // 0 the buttons, 1 the inputs, 2 the team's card
     private List<HomeApps.Item> drawerButtons = new ArrayList<>(), inputsList = new ArrayList<>();
@@ -2872,7 +2883,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             else list.add(it);
         }
         if (!HomeApps.allInputs(c).isEmpty()) list.add(HomeApps.action(HomeApps.INPUTS, "inputs", "Entradas", "hdmi"));
+        list.add(HomeApps.action(FAVS_KIND, "favs", "Mis fondos", "sparkles"));
         if (browser != null) list.add(browser);
+        list.add(HomeApps.action(HEART_KIND, "heart", "Guardar fondo", "sparkles"));
         // Two circles at the end: the team (its crest only) and the weather (OK opens its panel).
         if (Prefs.futbol()) list.add(HomeApps.action(TEAM_KIND, "team", "Mi equipo", "tv"));
         if (Prefs.weather()) list.add(HomeApps.action(WX_KIND, "weather", "Clima", "partly_cloudy_day"));
@@ -2963,6 +2976,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     private void openDrawer() {
         if (drawerItems.isEmpty()) return;
+        refreshFavs(false);
         drawerOpen = true;
         drawer.target = 1;
         zone = Z_DRAWER;
@@ -3022,6 +3036,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         if (drawerPanel != 1) {   // D2: the wide buttons, and the team's card under them when it's open
             for (int i = 0; i < drawerItems.size(); i++) drawDrawerButton(c, i);
             if (drawerPanel == 2 && Prefs.futbol()) drawTeamBig(c, futbolCard);
+            if (drawerPanel == 5) drawFavsCard(c);
             if (drawerPanel == 3 && Prefs.weather()) {   // both at once: no pages to turn
                 drawerCard(c, weatherCard);
                 drawWeather(c, weatherCard);
@@ -3175,6 +3190,111 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
     }
 
+    /** A heart, `r` about half its width, filled or as an outline. */
+    private void drawHeart(Canvas c, float cx, float cy, float r, int color, boolean filled) {
+        heartPath.reset();
+        heartPath.moveTo(cx, cy + r * 0.95f);
+        heartPath.cubicTo(cx - r * 1.35f, cy + r * 0.05f, cx - r * 1.05f, cy - r * 1.05f, cx, cy - r * 0.45f);
+        heartPath.cubicTo(cx + r * 1.05f, cy - r * 1.05f, cx + r * 1.35f, cy + r * 0.05f, cx, cy + r * 0.95f);
+        heartPath.close();
+        if (filled) {
+            fill.setShader(null);
+            fill.setColor(0xFFFF4D6D);
+            c.drawPath(heartPath, fill);
+            return;
+        }
+        if (heartStroke == null) {
+            heartStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+            heartStroke.setStyle(Paint.Style.STROKE);
+            heartStroke.setStrokeJoin(Paint.Join.ROUND);
+        }
+        heartStroke.setStrokeWidth(3.2f * k);
+        heartStroke.setColor(color);
+        c.drawPath(heartPath, heartStroke);
+    }
+
+    /** What the heart and "Mis fondos" show: is the background on screen saved, and how many are (background thread). */
+    private void refreshFavs(boolean thumbs) {
+        final Context ctx = getContext().getApplicationContext();
+        LOADER.execute(() -> {
+            Gallery.Item cur = wallpaperWanted ? Gallery.current(ctx) : null;
+            boolean on = cur != null && Gallery.isFavorite(ctx, cur.url);
+            List<Gallery.Item> list = new ArrayList<>();
+            for (Gallery.Item it : Gallery.favorites(ctx)) if (!it.paused) list.add(it);
+            handler.post(() -> {
+                heartOn = on;
+                favs = list;
+                favCount = list.size();
+                favIndex = Math.min(favIndex, Math.max(0, list.size() - 1));
+                drawerDirty = true;
+                wake();
+            });
+            if (!thumbs) return;
+            for (Gallery.Item it : list) {   // small copies for the card, one by one
+                if (favThumbs.containsKey(it.url)) continue;
+                try {
+                    java.io.File f = Gallery.image(ctx, it);
+                    android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+                    o.inSampleSize = 4;
+                    o.inPreferredConfig = Bitmap.Config.RGB_565;
+                    Bitmap b = android.graphics.BitmapFactory.decodeFile(f.getPath(), o);
+                    if (b == null) continue;
+                    handler.post(() -> {
+                        favThumbs.put(it.url, b);
+                        drawerDirty = true;
+                        wake();
+                    });
+                } catch (Exception | OutOfMemoryError e) {
+                    AppLog.w("fav thumb: " + e.getMessage());
+                }
+            }
+        });
+    }
+
+    /** "Mis fondos": the saved backgrounds in a row under the buttons; OK puts the focused one on Home. */
+    private void drawFavsCard(Canvas c) {
+        favsCard.set(MARGIN * k, CARDS_TOP * k, CONTENT_R * k, (CARDS_TOP + CARDS_H) * k);
+        drawerCard(c, favsCard);
+        if (favHead == null) {
+            favHead = new TextPaint(Ui.text(Ui.semibold, 21 * k, 0xD9FFFFFF));
+            favHead.setLetterSpacing(0.16f);
+            favEmpty = new TextPaint(Ui.text(Ui.regular, 26 * k, 0xCCFFFFFF));
+        }
+        favHead.setColor(tone(L_DIM, 0xD9FFFFFF));
+        favEmpty.setColor(drawerInk(0.85f));
+        float x0 = favsCard.left + 36 * k, top = favsCard.top + 70 * k;
+        c.drawText(zone == Z_FAVS ? "MIS FONDOS  ·  OK LO PONE DE FONDO" : "MIS FONDOS  ·  ↓ PARA ELEGIR", x0, favsCard.top + 46 * k, favHead);
+        if (favs.isEmpty()) {
+            c.drawText("Todavía no guardaste fondos: tocá el corazón para guardar el que estás viendo.", x0,
+                    favsCard.centerY() + 20 * k, favEmpty);
+            return;
+        }
+        float th = favsCard.bottom - 30 * k - top, tw = th * 16 / 9, gap = 22 * k;
+        int perView = Math.max(1, (int) ((favsCard.width() - 72 * k + gap) / (tw + gap)));
+        int first = zone == Z_FAVS ? Math.max(0, Math.min(favIndex - perView / 2, favs.size() - perView)) : 0;
+        c.save();
+        c.clipRect(favsCard.left + 20 * k, favsCard.top, favsCard.right - 20 * k, favsCard.bottom);
+        for (int i = Math.max(0, first); i < favs.size() && i < first + perView + 1; i++) {
+            float x = x0 + (i - first) * (tw + gap);
+            boolean f = zone == Z_FAVS && i == favIndex;
+            float g = f ? 8 * k : 0;
+            cell.set(x - g, top - g, x + tw + g, top + th + g);
+            Bitmap b = favThumbs.get(favs.get(i).url);
+            if (b != null) cropImage(c, b, cell, 14 * k);
+            else {
+                fill.setShader(null);
+                fill.setColor(0x33FFFFFF);
+                c.drawRoundRect(cell, 14 * k, 14 * k, fill);
+            }
+            if (f) {
+                focusRing.setStrokeWidth(4 * k);
+                focusRing.setColor(0xF2FFFFFF);
+                c.drawRoundRect(cell.left - 5 * k, cell.top - 5 * k, cell.right + 5 * k, cell.bottom + 5 * k, 19 * k, 19 * k, focusRing);
+            }
+        }
+        c.restore();
+    }
+
     /** D2: a wide drawer button: its symbol (the team's crest) on the left, the name and a line under it. */
     private void drawDrawerButton(Canvas c, int i) {
         HomeApps.Item it = drawerItems.get(i);
@@ -3201,6 +3321,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             btnSub = new TextPaint(Ui.text(Ui.regular, 20 * k, 0xB3FFFFFF));
         }
         if (circle(it)) {
+            if (it.kind == HEART_KIND) {   // filled: the background on screen is saved
+                drawHeart(c, cx, cy + 2 * k * s, 21 * k * s, ink, heartOn);
+                return;
+            }
             if (it.kind == TEAM_KIND) {
                 Futbol.Match m = teamMatch(false);
                 if (m == null) m = teamMatch(true);
@@ -3230,6 +3354,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             if (it.kind == HomeApps.ALL_APPS) sub = others.size() + " apps";
             else if (it.kind == HomeApps.ANDROID_SETTINGS) sub = "Imagen, sonido, red";
             else if (it.kind == HomeApps.INPUTS) sub = "TV en vivo · HDMI";
+            else if (it.kind == FAVS_KIND) sub = favCount == 0 ? "Ninguno guardado" : favCount == 1 ? "1 guardado" : favCount + " guardados";
         }
         btnTitle.setColor(ink);
         btnTitle.setTextSize(27 * k * s);
@@ -3869,7 +3994,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             click.move();
             return;
         }
-        if (!sheetOpen && (zone == Z_DRAWER || zone == Z_FUTBOL || zone == Z_WEATHER) && drawerPanel != 0) {
+        if (!sheetOpen && (zone == Z_DRAWER || zone == Z_FUTBOL || zone == Z_WEATHER || zone == Z_FAVS) && drawerPanel != 0) {
             if (drawerPanel == 1) unfoldInputs(false);
             drawerPanel = 0;
             zone = Z_DRAWER;
@@ -3998,6 +4123,18 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 drawerDirty = true;
                 break;
             }
+            case Z_FAVS:
+                if (dx != 0) {
+                    int next = Math.max(0, Math.min(favs.size() - 1, favIndex + dx));
+                    if (next == favIndex) return;
+                    favIndex = next;
+                } else if (dy < 0) {
+                    zone = Z_DRAWER;
+                } else {
+                    return;
+                }
+                drawerDirty = true;
+                break;
             case WIDGETS: {
                 List<Integer> on = widgets();
                 int at = on.indexOf(widgetIndex);
@@ -4017,6 +4154,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                     drawerIndex = next;
                 } else if (dy < 0) {
                     closeDrawer();
+                } else if (drawerPanel == 5 && !favs.isEmpty() && !talkBack()) {
+                    zone = Z_FAVS;   // down onto the saved backgrounds
+                    drawerDirty = true;
                 } else if (false) {   // the team's card has nothing to move to
                 } else if (talkBack() && !widgets().isEmpty()) {
                     // Only with TalkBack: the widgets are there to be read, and this is how it gets to them.
@@ -4066,6 +4206,22 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     private void activate() {
         wake();
+        if (zone == Z_FAVS) {   // a saved background: on Home now
+            if (favIndex >= favs.size()) return;
+            click.open();
+            final String url = favs.get(favIndex).url;
+            final Context fc = getContext().getApplicationContext();
+            LOADER.execute(() -> {
+                Gallery.showFavorite(fc, url);
+                handler.post(() -> {
+                    updateWallpaper();
+                    heartOn = true;
+                    drawerDirty = true;
+                    showToast("Fondo cambiado");
+                });
+            });
+            return;
+        }
         if (zone == Z_WXBTN) {   // W1: the weather's panel opens (or closes)
             wxOpen = !wxOpen;
             click.open();
@@ -4115,6 +4271,26 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 click.open();
                 unfoldInputs(true);
                 retarget(false);
+                return;
+            }
+            if (it.kind == HEART_KIND) {   // saves (or un-saves) the background on screen
+                click.open();
+                final Context hc = getContext().getApplicationContext();
+                LOADER.execute(() -> {
+                    Gallery.Item cur = wallpaperWanted ? Gallery.current(hc) : null;
+                    boolean nowOn = cur != null && Gallery.toggleFavorite(hc, cur);
+                    handler.post(() -> {
+                        showToast(cur == null ? "No hay un fondo para guardar" : nowOn ? "Fondo guardado en Mis fondos" : "Fondo quitado de Mis fondos");
+                        refreshFavs(drawerPanel == 5);
+                    });
+                });
+                return;
+            }
+            if (it.kind == FAVS_KIND) {   // the saved ones open (or close) under the buttons
+                click.open();
+                drawerPanel = drawerPanel == 5 ? 0 : 5;
+                if (drawerPanel == 5) refreshFavs(true);
+                drawerDirty = true;
                 return;
             }
             if (it.kind == WX_KIND) {   // the weather's card opens (or closes) under the buttons

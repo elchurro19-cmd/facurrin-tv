@@ -401,8 +401,15 @@ final class Gallery {
         item.title = name.lastIndexOf('.') > 0 ? name.substring(0, name.lastIndexOf('.')) : name;
         if (!isFavorite(c, item.url)) toggleFavorite(c, item);
         if (!show) return;
-        setPaused(c, item.url, false);   // chosen as the background: shown again if it was hidden
+        showFavorite(c, item.url);
+    }
+
+    /** Home's background becomes the favourites, with this one on screen now (the next ones follow in their turn). */
+    static synchronized void showFavorite(Context c, String url) {
+        setPaused(c, url, false);   // chosen as the background: shown again if it was hidden
         if (photos(Prefs.seasonalTheme(c))) return;   // a theme's favourite: the theme shows it among its own
+        Item item = new Item();
+        item.url = url;
         List<Item> list = shown(favorites(c));
         int index = 0;
         for (int i = 0; i < list.size(); i++) if (list.get(i).url.equals(item.url)) index = i;
