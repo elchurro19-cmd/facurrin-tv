@@ -658,7 +658,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 Symbols.draw(getContext(), c, sym, cx, cy, s, ink);
             }
             c.restore();
-            if (running) postInvalidateDelayed(idleMode() ? 1000 : 100);   // 10 a second: gentle and light
+            // On this TV every frame draws the whole screen again: the symbol moves for 15 s after a key (or coming back
+            // to Home), then rests (a still frame costs nothing).
+            if (running && SystemClock.uptimeMillis() - lastKeyAt < 15_000) postInvalidateDelayed(100);
         }
     }
 
@@ -1285,6 +1287,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             zone = Z_IDLE;
             retarget(true);
         }
+        lastKeyAt = SystemClock.uptimeMillis();   // back on Home: things move for a moment
         applyDim();
         updateWallpaper();
         restartTick();
@@ -4152,6 +4155,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     boolean onKey(KeyEvent e) {
         boolean wasIdle = idleMode();
         lastKeyAt = SystemClock.uptimeMillis();
+        if (wxView != null) wxView.invalidate();   // the weather's symbol moves again for a while
         if (wasIdle) {   // back from idle: everything moves at full speed again
             restartScene();
             restartTick();
