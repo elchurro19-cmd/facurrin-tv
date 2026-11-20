@@ -128,7 +128,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private int favRow;   // in the card: 0 the switch (top right), 1 the pictures
     private final RectF favSwitch = new RectF();
     private TextPaint favSwitchText;
-    private static final float FAVS_TOP = 812;   // under the heart's second button
+    private static final float FAVS_TOP = 794, FAVS_H = 262;   // under the heart's pill, ending above the screen's edge
     private int favCount, favIndex;
     private List<Gallery.Item> favs = new ArrayList<>();
     private final java.util.Map<String, Bitmap> favThumbs = new java.util.HashMap<>();
@@ -1370,7 +1370,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         // Glass edition: taller, for the bigger dock and the focused tile rising out of it (were 320 and 270).
         measure(platter, width, Math.round(380 * kk));
         measure(tiles, width, Math.round(340 * kk));
-        measure(drawerLayer, width, Math.round(700 * kk));   // taller: the saved backgrounds sit under the heart's pill
+        measure(drawerLayer, width, Math.round(600 * kk));
         measure(sheetLayer, width, height);
         measure(toastLayer, Math.round(1000 * kk), Math.round(220 * kk));
         setMeasuredDimension(width, height);
@@ -3334,7 +3334,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     /** "Mis fondos": the saved backgrounds in a row under the buttons; OK puts the focused one on Home. */
     private void drawFavsCard(Canvas c) {
-        favsCard.set(MARGIN * k, FAVS_TOP * k, CONTENT_R * k, (FAVS_TOP + CARDS_H) * k);
+        favsCard.set(MARGIN * k, FAVS_TOP * k, CONTENT_R * k, (FAVS_TOP + FAVS_H) * k);
         drawerCard(c, favsCard);
         if (favHead == null) {
             favHead = new TextPaint(Ui.text(Ui.semibold, 21 * k, 0xD9FFFFFF));
