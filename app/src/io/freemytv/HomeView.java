@@ -128,7 +128,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private int favRow;   // in the card: 0 the switch (top right), 1 the pictures
     private final RectF favSwitch = new RectF();
     private TextPaint favSwitchText;
-    private static final float FAVS_TOP = 794, FAVS_H = 262;   // under the heart's pill, ending above the screen's edge
+    private static final float FAVS_TOP = 808, FAVS_H = 250;   // under the heart's pill, ending above the screen's edge
     private int favCount, favIndex;
     private List<Gallery.Item> favs = new ArrayList<>();
     private final java.util.Map<String, Bitmap> favThumbs = new java.util.HashMap<>();
@@ -3040,6 +3040,14 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         float titleBase = ROW_TITLE * k;
         if (drawerPanel == 1) c.drawText("Entradas  ·  Atrás vuelve", drawerRects[0].left + 4 * k, titleBase, rowTitle);
         if (drawerPanel != 1) {   // D2: the wide buttons, and the team's card under them when it's open
+            if (drawerPanel == 2 && Prefs.futbol()) drawTeamBig(c, futbolCard);
+            if (drawerPanel == 5) drawFavsCard(c);
+            if (drawerPanel == 3 && Prefs.weather()) {   // both at once: no pages to turn
+                drawerCard(c, weatherCard);
+                drawWeather(c, weatherCard);
+                drawerCard(c, weekCard);
+                drawWeek(c, weekCard);
+            }
             if (!drawerItems.isEmpty()) drawerGlass(c, dockStrip, dockStrip.height() / 2, 0.45f, 0x10000000, 6 * k);
             for (int i = 0; i < drawerItems.size(); i++) drawDrawerButton(c, i);
             if (drawerPanel == 0 && zone == Z_DRAWER && drawerIndex < drawerItems.size()) {   // the name, under it
@@ -3056,14 +3064,6 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 float y = dockStrip.bottom + 44 * k + (it.kind == HEART_KIND ? 122 * k - 24 * k : 0);
                 c.drawText(tx[0], r.centerX(), y, dockLabel);
                 if (!tx[1].isEmpty()) c.drawText(tx[1], r.centerX(), y + 32 * k, dockSub);
-            }
-            if (drawerPanel == 2 && Prefs.futbol()) drawTeamBig(c, futbolCard);
-            if (drawerPanel == 5) drawFavsCard(c);
-            if (drawerPanel == 3 && Prefs.weather()) {   // both at once: no pages to turn
-                drawerCard(c, weatherCard);
-                drawWeather(c, weatherCard);
-                drawerCard(c, weekCard);
-                drawWeek(c, weekCard);
             }
             return;
         }
@@ -3218,7 +3218,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
      */
     private void drawHeartButton(Canvas c, int i) {
         RectF base = drawerRects[i];
-        float f = Ui.clamp(drawerFocus[i].value), open = Math.max(f, heartSub ? 1 : 0);
+        float f = Ui.clamp(drawerFocus[i].value), open = Math.max(f, heartSub || drawerPanel == 5 ? 1 : 0);
         float d = base.height(), cx = base.centerX(), top = base.top, sub = 12 * k + d;
         cell.set(base.left, top, base.right, base.bottom + sub * open);
         float r = d / 2;
@@ -4321,6 +4321,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 boolean onHeartBtn = drawerIndex < drawerItems.size() && drawerItems.get(drawerIndex).kind == HEART_KIND;
                 if (dx != 0) {
                     heartSub = false;
+                    if (drawerPanel == 2 || drawerPanel == 3 || drawerPanel == 5) drawerPanel = 0;   // its card goes with it
                     int next = Math.max(0, Math.min(drawerItems.size() - 1, drawerIndex + dx));
                     if (next == drawerIndex) return;
                     drawerIndex = next;
