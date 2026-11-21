@@ -335,6 +335,57 @@ public class SettingsActivity extends Activity {
             return stale ? "" : state.optString("busy");
         }
 
+        /** USB debugging on: the switch talks to the TV's own ADB, which only answers then. */
+        private boolean debuggingOn() {
+            try {
+                return android.provider.Settings.Global.getInt(getContext().getContentResolver(), android.provider.Settings.Global.ADB_ENABLED, 0) == 1;
+            } catch (RuntimeException e) {
+                return true;   // can't tell: let the switch try (it says what's missing)
+            }
+        }
+
+        private boolean developerOn() {
+            try {
+                return android.provider.Settings.Global.getInt(getContext().getContentResolver(),
+                        android.provider.Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) == 1;
+            } catch (RuntimeException e) {
+                return false;
+            }
+        }
+
+        /** Where to go next: the developer options if they're on, else "About" (to tap Build seven times). */
+        private void openDebugSettings() {
+            Context c = getContext();
+            String[] actions = developerOn()
+                    ? new String[] {android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS, android.provider.Settings.ACTION_SETTINGS}
+                    : new String[] {android.provider.Settings.ACTION_DEVICE_INFO_SETTINGS, android.provider.Settings.ACTION_SETTINGS};
+            for (String a : actions) {
+                try {
+                    c.startActivity(new Intent(a).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                    return;
+                } catch (RuntimeException ignored) {
+                }
+            }
+        }
+
+        /** The steps to turn debugging on, numbered; the one already done is ticked. Returns where they end. */
+        private float drawDebugSteps(Canvas c, float x, float y) {
+            Paint head = Ui.text(Ui.semibold, 28 * k, 0xFFFFD66B);
+            Paint line = Ui.text(Ui.regular, 24 * k, 0xE6FFFFFF);
+            c.drawText("Primero activá la depuración", x, y, head);
+            boolean dev = developerOn();
+            String[] steps = {
+                    (dev ? "✓ " : "1. ") + "Ajustes → Preferencias del dispositivo → Información:",
+                    "    tocá 7 veces Compilación (Build).",
+                    "2. Volvé atrás → Opciones de desarrollador:",
+                    "    activá Depuración por USB (y Depuración de red, si está).",
+                    "3. Volvé acá y elegí Facurrin TV."};
+            for (int i = 0; i < steps.length; i++) c.drawText(steps[i], x, y + (46 + i * 36) * k, line);
+            Paint hint = Ui.text(Ui.medium, 22 * k, 0x99FFFFFF);
+            c.drawText("OK te lleva a " + (dev ? "Opciones de desarrollador" : "Información") + ".", x, y + (46 + steps.length * 36 + 14) * k, hint);
+            return y + (46 + steps.length * 36 + 14) * k;
+        }
+
         private boolean freeActive() {
             return HomeMode.FREE.equals(state.optString("mode")) && !state.optBoolean("homeReverted");
         }
@@ -457,6 +508,9 @@ public class SettingsActivity extends Activity {
             c.drawText(names[at], LIST_X * k + 30 * k, (LIST_TOP - 24) * k, heading);
             if (at == 2 || at == 3 || at == 5) {   // the rows themselves, quiet (not focused)
                 drawRows(c, at == 2 ? HOME_SETTINGS : at == 3 ? BACKGROUNDS : REMOTE_KEYS, true);
+            } else if (at == 0 && !debuggingOn() && !busy()) {
+                drawDebugSteps(c, LIST_X * k + 30 * k, (LIST_TOP + 40) * k);
+                return;
             } else {
                 String[] about = {"Facurrin TV o la pantalla de inicio original de la tele.", "OK muestra el protector de pantalla ahora.", "",
                         "", "Qué apps van en la barra y en qué orden.", "", "Abre los ajustes de Android TV: imagen, sonido, red."};
@@ -584,6 +638,10 @@ public class SettingsActivity extends Activity {
                     float cw = Symbols.width(getContext(), "check", 26 * k);
                     Symbols.draw(getContext(), c, "check", rowRect.right - 30 * k - cw / 2, rowRect.centerY(), 26 * k, blend(0xFFFFFFFF, INK, f));
                 }
+            }
+            if (!debuggingOn() && !busy()) {
+                drawDebugSteps(c, LIST_X * k + 30 * k, (LIST_TOP + 20 + 2 * (CHOICE_H + ROW_GAP) + 50) * k);
+                return;
             }
             Paint hint = Ui.text(Ui.regular, 23 * k, 0x8CFFFFFF);
             c.drawText(Ui.tr("Switching takes a few seconds; the screen blinks while it measures."), LIST_X * k + 30 * k,
@@ -1189,6 +1247,10 @@ public class SettingsActivity extends Activity {
 
         private void activate() {
             Context c = getContext();
+            if (screen == HOME_CHOICE && !debuggingOn() && !busy()) {
+                openDebugSettings();
+                return;
+            }
             if (screen == HOME_CHOICE) {
                 boolean wantFree = focus == 0;
                 boolean already = wantFree ? freeActive() : HomeMode.ORIGINAL.equals(state.optString("mode", HomeMode.ORIGINAL));
