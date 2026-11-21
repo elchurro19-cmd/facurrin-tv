@@ -9,19 +9,37 @@ protector de pantalla con tu música. Probado en una Noblex con Android 11.
 
 ### Instalarlo
 
-1. **En la tele:** Ajustes → Preferencias del dispositivo → Información → tocá 7 veces *Compilación* (se activan las
-   opciones de desarrollador). Después, en Opciones de desarrollador, activá *Depuración por USB* / *Depuración de red*.
-   Anotá la IP de la tele (Ajustes → Red).
-2. **En la compu:** descargá `FacurrinTV.apk` de [Releases](../../releases) y las
-   [herramientas de Android (adb)](https://developer.android.com/tools/releases/platform-tools). Después:
-   ```
-   adb connect IP-DE-LA-TELE:5555
-   adb install -r FacurrinTV.apk
-   adb shell cmd package compile -m speed -f io.freemytv
-   ```
-   La tele pregunta *¿Permitir depuración?*: aceptá y marcá *Permitir siempre*.
-3. **En la tele:** abrí la app *Facurrin TV* → *Pantalla de inicio* → *Facurrin TV*. La primera vez aparece una
-   **bienvenida** para elegir tu ciudad, tu equipo y el fondo. Todo se cambia después en el centro de control.
+**Antes, en la tele (una sola vez):** Ajustes → Preferencias del dispositivo → Información → tocá 7 veces
+*Compilación* hasta que diga que sos desarrollador. Después, en *Opciones de desarrollador*, activá **Depuración por
+USB** (y *Depuración de red* o *ADB por red*, si tu tele lo tiene). El launcher lo necesita para convertirse en el
+inicio de la tele.
+
+#### Opción fácil: con Downloader (sin compu)
+
+1. En la Play Store de la tele, instalá **Downloader** (de AFTVnews).
+2. Abrilo, escribí el código **`4418755`** y apretá *Ir*.
+3. Se descarga Facurrin TV. Si pregunta, permití que Downloader instale apps y tocá *Instalar*.
+4. Seguí con el paso *Activarlo* de abajo.
+
+El código siempre baja la última versión, así que sirve también para actualizar.
+
+#### Opción con la compu (adb)
+
+Descargá `FacurrinTV.apk` de [Releases](../../releases) y las
+[herramientas de Android (adb)](https://developer.android.com/tools/releases/platform-tools). Con la IP de la tele
+(Ajustes → Red):
+```
+adb connect IP-DE-LA-TELE:5555
+adb install -r FacurrinTV.apk
+adb shell cmd package compile -m speed -f io.freemytv
+```
+La tele pregunta *¿Permitir depuración?*: aceptá y marcá *Permitir siempre*. El último comando la deja más rápida.
+
+#### Activarlo
+
+Abrí la app *Facurrin TV* → *Pantalla de inicio* → *Facurrin TV*. Si la tele pregunta *¿Permitir depuración?*,
+aceptá y marcá *Permitir siempre*. La primera vez aparece una **bienvenida** para elegir tu ciudad, tu equipo y el
+fondo; todo se cambia después en el centro de control.
 
 La versión para descargar no trae clave de TMDB: funciona todo menos las recomendaciones de películas y series.
 
