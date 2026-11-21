@@ -1,3 +1,35 @@
+# Free My TV Glass
+
+**Hecho por Facurrin** · sobre [Free My TV](https://github.com/simbasjungles/free-my-tv) (código abierto, MIT) y su
+adaptación argentina [Argentinoman/freemytv-argentinoman](https://github.com/Argentinoman/freemytv-argentinoman).
+
+Un inicio limpio, rápido y sin publicidad para televisores con Android TV o Google TV, con aspecto de vidrio:
+reloj grande, clima, los partidos de tus equipos, reproductor de música, fotos del día de Bing de fondo y un
+protector de pantalla con tu música. Probado en una Noblex con Android 11.
+
+### Instalarlo
+
+1. **En la tele:** Ajustes → Preferencias del dispositivo → Información → tocá 7 veces *Compilación* (se activan las
+   opciones de desarrollador). Después, en Opciones de desarrollador, activá *Depuración por USB* / *Depuración de red*.
+   Anotá la IP de la tele (Ajustes → Red).
+2. **En la compu:** descargá `FreeMyTV-Glass.apk` de [Releases](../../releases) y las
+   [herramientas de Android (adb)](https://developer.android.com/tools/releases/platform-tools). Después:
+   ```
+   adb connect IP-DE-LA-TELE:5555
+   adb install -r FreeMyTV-Glass.apk
+   adb shell cmd package compile -m speed -f io.freemytv
+   ```
+   La tele pregunta *¿Permitir depuración?*: aceptá y marcá *Permitir siempre*.
+3. **En la tele:** abrí la app *Free My TV* → *Pantalla de inicio* → *Free My TV*. La primera vez aparece una
+   **bienvenida** para elegir tu ciudad, tu equipo y el fondo. Todo se cambia después en el centro de control.
+
+Para volver al inicio original de la tele: *Free My TV* → *Pantalla de inicio* → *Original*.
+
+Sin clave de TMDB funciona todo menos las recomendaciones de películas y series. Si querés compilarlo vos con tu
+clave, mirá [Make it yours](#make-it-yours) y `CLAUDE.md`.
+
+---
+
 <div align="center">
 
 <img src="docs/assets/icon-512.png" width="96" alt="">

@@ -38,6 +38,7 @@ import java.util.Locale;
  */
 public class QuickSettingsActivity extends Activity {
     private PanelView panel;
+    private boolean welcomeStart;
 
     /** The city's box: a text field over the panel's own row, in its colours and letter. */
     private android.widget.EditText cityField;
@@ -46,6 +47,7 @@ public class QuickSettingsActivity extends Activity {
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         Ui.init(this);
+        welcomeStart = getIntent() != null && getIntent().getBooleanExtra("welcome", false);
         panel = new PanelView(this);
         android.widget.FrameLayout root = new android.widget.FrameLayout(this);
         root.addView(panel);
@@ -67,6 +69,11 @@ public class QuickSettingsActivity extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        if (intent != null && intent.getBooleanExtra("welcome", false)) {
+            panel.startWelcome();
+            return;
+        }
+        if (panel.welcomeMode) return;   // the welcome isn't closed by the gear
         panel.close();
     }
 
@@ -94,6 +101,9 @@ public class QuickSettingsActivity extends Activity {
         super.finish();
         overridePendingTransition(0, 0);
     }
+
+    /** Who made it: shown at the foot of the welcome and in Info. */
+    static final String CREDIT = "Hecho por Facurrin · sobre Free My TV (código abierto)";
 
     private static final class Tile {
         final String title, symbol;
@@ -152,6 +162,8 @@ public class QuickSettingsActivity extends Activity {
             glyph.setStrokeCap(Paint.Cap.ROUND);
             glyph.setStrokeJoin(Paint.Join.ROUND);
             buildTiles();
+            buildWelcome();
+            if (welcomeStart) startWelcome();
             arrangeTiles();
             loadGlass(c);
             ValueAnimator in = ValueAnimator.ofFloat(0, 1);
@@ -174,7 +186,7 @@ public class QuickSettingsActivity extends Activity {
         private int subFrom;
 
         private List<Tile> rows() {
-            return subList != null ? subList : sectTiles.get(sect);
+            return subList != null ? subList : welcomeMode ? stepRows.get(step) : sectTiles.get(sect);
         }
 
         private void openSub(String title, List<Tile> list) {
@@ -329,12 +341,12 @@ public class QuickSettingsActivity extends Activity {
             // Inicio: the home screen's own settings (the longer ones open their screen).
             final String[] units = {"auto", "C", "F"}, unitNames = {"Automática", "°C", "°F"};
             List<Tile> home = section("Inicio", "home");
-            home.add(cycle("Temperatura", "sunny", () -> unitNames[at(units, Prefs.temperature())],
+            home.add(tempTile = cycle("Temperatura", "sunny", () -> unitNames[at(units, Prefs.temperature())],
                     d -> Prefs.setTemperature(units[(at(units, Prefs.temperature()) + d + 3) % 3])));
             home.add(cycle("Estilo de la barra", "apps", () -> Prefs.shelfStyle().equals("icons") ? "Íconos" : "Tarjetas",
                     d -> Prefs.setShelfStyle(Prefs.shelfStyle().equals("icons") ? "cards" : "icons")));
-            home.add(toggle("Clima", "partly_cloudy_day", Prefs::weather, () -> Prefs.setWeather(!Prefs.weather())));
-            home.add(toggle("Fútbol", "ball", Prefs::futbol, () -> Prefs.setFutbol(!Prefs.futbol())));
+            home.add(weatherTile = toggle("Clima", "partly_cloudy_day", Prefs::weather, () -> Prefs.setWeather(!Prefs.weather())));
+            home.add(futbolTile = toggle("Fútbol", "ball", Prefs::futbol, () -> Prefs.setFutbol(!Prefs.futbol())));
             home.add(toggle("Continuar viendo", "play", Prefs::watchNext, () -> Prefs.setWatchNext(!Prefs.watchNext())));
             home.add(toggle("Sonidos al navegar", "speaker", Prefs::sounds, () -> Prefs.setSounds(!Prefs.sounds())));
             final String[] langs = SettingsActivity.SettingsView.languageChoices();
@@ -345,6 +357,7 @@ public class QuickSettingsActivity extends Activity {
             city.sub = Prefs.city().isEmpty() ? "Elegí tu ciudad" : Prefs.city();
             city.stay = () -> askCity(city);
             home.add(city);
+            cityTile = city;
             final String[][] clubs = SettingsActivity.SettingsView.CLUBS, nations = SettingsActivity.SettingsView.NATIONS;
             final String[] clubNames = new String[clubs.length], nationNames = new String[nations.length];
             for (int i = 0; i < clubs.length; i++) clubNames[i] = clubs[i][1];
@@ -358,11 +371,13 @@ public class QuickSettingsActivity extends Activity {
             };
             clubT.stay = this::openTeams;
             home.add(clubT);
+            clubTile = clubT;
             final Tile nationT = new Tile("Selección", "ball", null);
             nationT.opens = true;
             nationT.value = () -> !Prefs.nationName().isEmpty() ? Prefs.nationName() : nationNames[SettingsActivity.SettingsView.indexOf(nations, Prefs.nation())];
             nationT.stay = () -> askLive("Selección", "Escribí el país (aparecen mientras escribís)", true);
             home.add(nationT);
+            nationTile = nationT;
 
             // Fondos: what's behind the home screen and the screensaver.
             final String[] bk = Gallery.bingKinds();
@@ -381,7 +396,7 @@ public class QuickSettingsActivity extends Activity {
             final int[] minutes = {60, 360, 720, 1440, 10080};
             final String[] minuteNames = {"1 hora", "6 horas", "12 horas", "1 día", "1 semana"};
             List<Tile> bg = section("Fondos", "sync");
-            bg.add(picker("Fondo del inicio", "sync", kindNames, () -> at(kinds, Prefs.homeBackground(c)),
+            bg.add(homeBgTile = picker("Fondo del inicio", "sync", kindNames, () -> at(kinds, Prefs.homeBackground(c)),
                     i -> Prefs.setHomeBackground(c, kinds[i])));
             bg.add(cycle("Cambiar cada", "sync", () -> {
                 int m = Prefs.homeBackgroundMinutes(c);
@@ -392,7 +407,7 @@ public class QuickSettingsActivity extends Activity {
                 for (int j = 0; j < minutes.length; j++) if (minutes[j] == m) i = j;
                 Prefs.setHomeBackgroundMinutes(c, minutes[(i + d + minutes.length) % minutes.length]);
             }));
-            bg.add(picker("Protector de pantalla", "bedtime", saverNames, () -> at(savers, Prefs.screensaver(c)),
+            bg.add(saverTile = picker("Protector de pantalla", "bedtime", saverNames, () -> at(savers, Prefs.screensaver(c)),
                     i -> Prefs.setScreensaver(c, savers[i])));
             bg.add(toggle("Usar galería de favoritos", "sparkles", () -> Prefs.homeBackground(c).equals(Gallery.FAVORITES), () -> {
                 String now = Prefs.homeBackground(c);
@@ -429,6 +444,25 @@ public class QuickSettingsActivity extends Activity {
                 invalidate();
             };
             more.add(mode);
+            List<Tile> info = section("Info", "sparkles");
+            Tile made = new Tile("Free My TV Glass", "sparkles", null);
+            made.sub = CREDIT;
+            made.stay = () -> { };
+            info.add(made);
+            Tile ver = new Tile("Versión", "settings", null);
+            String vn = "";
+            try {
+                vn = c.getPackageManager().getPackageInfo(c.getPackageName(), 0).versionName;
+            } catch (Exception ignored) {
+            }
+            final String vName = vn == null ? "" : vn;
+            ver.value = () -> vName;
+            ver.stay = () -> { };
+            info.add(ver);
+            Tile again = new Tile("Ver la bienvenida otra vez", "home", null);
+            again.sub = "Ciudad, equipo y fondo, paso a paso";
+            again.stay = this::startWelcome;
+            info.add(again);
             String services = Settings.Secure.getString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
             if (services != null && services.contains(c.getPackageName() + "/")) {
                 quick.add(toggle("Recibir videos (DLNA)", "play", () -> Dlna.enabled(c), () -> Dlna.setEnabled(c, !Dlna.enabled(c))));
@@ -456,12 +490,17 @@ public class QuickSettingsActivity extends Activity {
             box.add(field);
             openSub(title, box);
             editing = true;
-            float x0 = getWidth() - 740 * k, cx = x0 + 186 * k, cr = x0 + 740 * k - 34 * k;
+            float x0 = getWidth() - 740 * k, cx = x0 + 186 * k, cr = x0 + 740 * k - 34 * k, rowTop = 136 * k;
+            if (welcomeMode) {
+                cx = cardLeft() + CARD_PAD * k;
+                cr = cardLeft() + (CARD_W - CARD_PAD) * k;
+                rowTop = (CARD_TOP + ROWS_AT) * k;
+            }
             float fh = 76 * k;   // as tall as the row's inside: the letters are never cut
             android.widget.FrameLayout.LayoutParams lp = new android.widget.FrameLayout.LayoutParams(
                     Math.round(cr - cx - 100 * k), Math.round(fh));
             lp.leftMargin = Math.round(cx + 74 * k);
-            lp.topMargin = Math.round(136 * k + (84 * k - fh) / 2);
+            lp.topMargin = Math.round(rowTop + (84 * k - fh) / 2);
             cityField.setLayoutParams(lp);
             cityField.setPadding(0, 0, 0, 0);
             cityField.setIncludeFontPadding(false);
@@ -865,6 +904,7 @@ public class QuickSettingsActivity extends Activity {
 
         boolean key(KeyEvent e) {
             if (closing) return true;   // on its way out
+            if (welcomeMode) return keyWelcome(e);
             if (e.getAction() != KeyEvent.ACTION_DOWN) {
                 if (isOk(e.getKeyCode()) && okPending) {   // a row with a hold: a short press acts on release
                     okPending = false;
@@ -926,6 +966,10 @@ public class QuickSettingsActivity extends Activity {
 
         @Override
         protected void onDraw(Canvas c) {
+            if (welcomeMode) {
+                drawWelcome(c);
+                return;
+            }
             float w = getWidth(), h = getHeight(), pw = 740 * k;
             // The scrim over what's behind, darker towards the panel.
             fill.setShader(new LinearGradient(w - pw - 300 * k, 0, w - pw, 0, 0x00000000, Ui.alpha(0x99000000, slide), Shader.TileMode.CLAMP));
@@ -1085,34 +1129,257 @@ public class QuickSettingsActivity extends Activity {
                 Tile t = l.get(i);
                 float hh = (t.wide ? 70 : 84) * k;
                 t.rect.set(cx, y, cr, y + hh);
-                r.set(t.rect);
-                boolean on = side == 1 && focus == i;
-                if (t.wide) drawSlider(c, t, on);
-                else {
-                    box(c, r, 22 * k, on);
-                    int ink = on ? 0xFF1C1C1E : 0xEBFFFFFF;
-                    drawGlyph(c, t.symbol, r.left + 38 * k, r.centerY(), 13 * k, ink);
-                    title.setColor(on ? 0xFF1C1C1E : 0xFFFFFFFF);
-                    sub.setColor(on ? 0x991C1C1E : 0x99FFFFFF);
-                    float tx = r.left + 76 * k;
-                    String vv = t.value != null ? t.value.get() : "";
-                    String val = vv.isEmpty() ? "" : t.cycle != null && t.on == null ? "‹  " + vv + "  ›" : t.opens ? vv + "   ›" : vv;
-                    valuePaint.setColor(on ? 0xB31C1C1E : 0xCCFFFFFF);
-                    float rightRoom = t.on != null ? (val.isEmpty() ? 100 * k : 200 * k) : !val.isEmpty() ? valuePaint.measureText(val) + 40 * k
-                            : t.action != null ? 50 * k : 24 * k;
-                    float room = r.right - tx - rightRoom;
-                    boolean two = t.sub != null && !t.sub.isEmpty();
-                    c.drawText(fit(t.title, title, room), tx, two ? r.centerY() - 4 * k : r.centerY() + Ui.halfCap(title), title);
-                    if (two) c.drawText(fit(t.sub, sub, room), tx, r.centerY() + 24 * k, sub);
-                    if (t.on != null) {
-                        drawSwitch(c, r.right - 26 * k, r.centerY(), t.on.getAsBoolean(), on);
-                        if (!val.isEmpty()) c.drawText(val, r.right - 110 * k, r.centerY() + Ui.halfCap(valuePaint), valuePaint);
-                    } else if (!val.isEmpty()) c.drawText(val, r.right - 26 * k, r.centerY() + Ui.halfCap(valuePaint), valuePaint);
-                    else if (t.action != null) c.drawText("›", r.right - 26 * k, r.centerY() + Ui.halfCap(valuePaint), valuePaint);
-                }
+                drawRow(c, t, side == 1 && focus == i);
                 y += hh + 12 * k;
             }
             c.restore();
+        }
+
+        /** One row at its `rect`: glass (white when focused), its symbol, title and line, and its value or switch. */
+        private void drawRow(Canvas c, Tile t, boolean on) {
+            if (valuePaint == null) {
+                colTitle = new TextPaint(Ui.text(Ui.displaySemibold, 36 * k, 0xFFFFFFFF));
+                railName = new TextPaint(Ui.text(Ui.medium, 20 * k, 0xFFFFFFFF));
+                railName.setTextAlign(Paint.Align.CENTER);
+                valuePaint = new TextPaint(Ui.text(Ui.regular, 21 * k, 0xCCFFFFFF));
+                valuePaint.setTextAlign(Paint.Align.RIGHT);
+            }
+            r.set(t.rect);
+            if (t.wide) {
+                drawSlider(c, t, on);
+                return;
+            }
+            box(c, r, 22 * k, on);
+            int ink = on ? 0xFF1C1C1E : 0xEBFFFFFF;
+            drawGlyph(c, t.symbol, r.left + 38 * k, r.centerY(), 13 * k, ink);
+            title.setColor(on ? 0xFF1C1C1E : 0xFFFFFFFF);
+            sub.setColor(on ? 0x991C1C1E : 0x99FFFFFF);
+            float tx = r.left + 76 * k;
+            String vv = t.value != null ? t.value.get() : "";
+            String val = vv.isEmpty() ? "" : t.cycle != null && t.on == null ? "‹  " + vv + "  ›" : t.opens ? vv + "   ›" : vv;
+            valuePaint.setColor(on ? 0xB31C1C1E : 0xCCFFFFFF);
+            float rightRoom = t.on != null ? (val.isEmpty() ? 100 * k : 200 * k) : !val.isEmpty() ? valuePaint.measureText(val) + 40 * k
+                    : t.action != null ? 50 * k : 24 * k;
+            float room = r.right - tx - rightRoom;
+            boolean two = t.sub != null && !t.sub.isEmpty();
+            c.drawText(fit(t.title, title, room), tx, two ? r.centerY() - 4 * k : r.centerY() + Ui.halfCap(title), title);
+            if (two) c.drawText(fit(t.sub, sub, room), tx, r.centerY() + 24 * k, sub);
+            if (t.on != null) {
+                drawSwitch(c, r.right - 26 * k, r.centerY(), t.on.getAsBoolean(), on);
+                if (!val.isEmpty()) c.drawText(val, r.right - 110 * k, r.centerY() + Ui.halfCap(valuePaint), valuePaint);
+            } else if (!val.isEmpty()) c.drawText(val, r.right - 26 * k, r.centerY() + Ui.halfCap(valuePaint), valuePaint);
+            else if (t.action != null) c.drawText("›", r.right - 26 * k, r.centerY() + Ui.halfCap(valuePaint), valuePaint);
+        }
+
+        // MARK: The welcome (B1): one step at a time on a glass card in the middle, over the home's picture blurred.
+
+        boolean welcomeMode;
+        private int step, btn = 1;
+        private final List<List<Tile>> stepRows = new ArrayList<>();
+        private Tile tempTile, weatherTile, futbolTile, cityTile, clubTile, nationTile, homeBgTile, saverTile;
+        private static final float CARD_W = 900, CARD_TOP = 120, CARD_H = 820, CARD_PAD = 60, ROWS_AT = 300;
+        private final String[] stepTitle = {"Hola, bienvenido", "¿Dónde estás?", "Tu equipo", "El fondo", "¡Listo!"};
+        private final String[] stepSub = {
+                "Free My TV Glass: un inicio limpio y rápido para tu tele.\nConfigurémoslo en un minuto; cada paso se puede saltear.",
+                "Para el clima y la hora a la que el inicio se pone oscuro.",
+                "Sus partidos y resultados en el inicio y en el protector.",
+                "Fotos del día detrás del inicio y en el protector de pantalla.",
+                "Ya podés usar tu tele.\nTodo esto se cambia después en el centro de control."};
+        private TextPaint wTitle, wSub, wStep, wBtn, wCredit;
+        private LinearGradient welcomeBg;
+
+        private void buildWelcome() {
+            for (int i = 0; i < stepTitle.length; i++) stepRows.add(new ArrayList<>());
+            stepRows.get(1).add(cityTile);
+            stepRows.get(1).add(tempTile);
+            stepRows.get(1).add(weatherTile);
+            stepRows.get(2).add(clubTile);
+            stepRows.get(2).add(nationTile);
+            stepRows.get(2).add(futbolTile);
+            stepRows.get(3).add(homeBgTile);
+            stepRows.get(3).add(saverTile);
+        }
+
+        void startWelcome() {
+            if (editing) stopEditing();
+            welcomeMode = true;
+            subList = null;
+            goStep(0);
+        }
+
+        private void goStep(int s) {
+            if (editing) stopEditing();
+            subList = null;
+            step = Math.max(0, Math.min(stepTitle.length - 1, s));
+            focus = 0;
+            onButtons = stepRows.get(step).isEmpty();
+            btn = 1;
+            invalidate();
+        }
+
+        private boolean onButtons;
+
+        private void finishWelcome() {
+            Prefs.setWelcomed(true);
+            changed();
+            welcomeMode = false;
+            if (welcomeStart) {
+                finish();
+                return;
+            }
+            side = 0;
+            focus = 0;
+            invalidate();
+        }
+
+        private float cardLeft() {
+            return (getWidth() - CARD_W * k) / 2;
+        }
+
+        boolean keyWelcome(KeyEvent e) {
+            int code = e.getKeyCode();
+            if (e.getAction() != KeyEvent.ACTION_DOWN) return code == KeyEvent.KEYCODE_BACK || isOk(code);
+            List<Tile> l = rows();
+            boolean last = step == stepTitle.length - 1;
+            switch (code) {
+                case KeyEvent.KEYCODE_BACK:
+                    if (subList != null) closeSub();
+                    else if (step > 0) goStep(step - 1);
+                    break;
+                case KeyEvent.KEYCODE_DPAD_UP:
+                    if (onButtons && !l.isEmpty() && subList == null) {
+                        onButtons = false;
+                        focus = l.size() - 1;
+                    } else if (!onButtons) focus = Math.max(0, focus - 1);
+                    break;
+                case KeyEvent.KEYCODE_DPAD_DOWN:
+                    if (onButtons) break;
+                    if (focus < l.size() - 1) focus++;
+                    else if (subList == null) onButtons = true;
+                    break;
+                case KeyEvent.KEYCODE_DPAD_LEFT:
+                case KeyEvent.KEYCODE_DPAD_RIGHT: {
+                    int d = code == KeyEvent.KEYCODE_DPAD_RIGHT ? 1 : -1;
+                    if (onButtons) {
+                        btn = Math.max(step == 0 ? 1 : 0, Math.min(1, btn + d));
+                        break;
+                    }
+                    if (l.isEmpty()) break;
+                    Tile cur = curTile();
+                    if (cur.cycle != null) cur.cycle.accept(d);
+                    else if (d < 0 && subList != null) closeSub();
+                    break;
+                }
+                default:
+                    if (!isOk(code)) return false;
+                    if (e.getRepeatCount() > 0) return true;
+                    if (onButtons) {
+                        if (btn == 0) goStep(step - 1);
+                        else if (last) finishWelcome();
+                        else goStep(step + 1);
+                        break;
+                    }
+                    if (l.isEmpty()) break;
+                    Tile tile = curTile();
+                    if (tile.stay != null) tile.stay.run();
+                    else if (tile.action != null) tile.action.run();
+                    break;
+            }
+            invalidate();
+            return true;
+        }
+
+        private void drawWelcome(Canvas c) {
+            float w = getWidth(), h = getHeight();
+            if (wTitle == null) {
+                wTitle = new TextPaint(Ui.text(Ui.displaySemibold, 54 * k, 0xFFFFFFFF));
+                wTitle.setTextAlign(Paint.Align.CENTER);
+                wSub = new TextPaint(Ui.text(Ui.regular, 25 * k, 0xC7FFFFFF));
+                wSub.setTextAlign(Paint.Align.CENTER);
+                wStep = new TextPaint(Ui.text(Ui.semibold, 19 * k, 0x99FFFFFF));
+                wStep.setTextAlign(Paint.Align.CENTER);
+                wStep.setLetterSpacing(0.14f);
+                wBtn = new TextPaint(Ui.text(Ui.medium, 25 * k, 0xFFFFFFFF));
+                wBtn.setTextAlign(Paint.Align.CENTER);
+                wCredit = new TextPaint(Ui.text(Ui.medium, 21 * k, 0x99FFFFFF));
+                wCredit.setTextAlign(Paint.Align.CENTER);
+                welcomeBg = new LinearGradient(0, 0, 0, 1, new int[] {0xFF1D2A40, 0xFF3A2F3F, 0xFF0E0E14}, null, Shader.TileMode.CLAMP);
+            }
+            // Behind: the home's picture blurred and darkened (or a dusk gradient before there is one).
+            fill.setShader(null);
+            if (blur != null) {
+                glassMatrix.setScale(w / Backdrop.FW, h / Backdrop.FH);
+                blurPaint.getShader().setLocalMatrix(glassMatrix);
+                c.drawRect(0, 0, w, h, blurPaint);
+                fill.setColor(0x66000000);
+                c.drawRect(0, 0, w, h, fill);
+            } else {
+                panelRect.set(0, 0, w, h);
+                place(welcomeBg, panelRect, false);
+                fill.setShader(welcomeBg);
+                c.drawRect(0, 0, w, h, fill);
+                fill.setShader(null);
+            }
+            float cl = cardLeft(), ct = CARD_TOP * k, cw = CARD_W * k, cb = ct + CARD_H * k, mid = cl + cw / 2;
+            panelRect.set(cl, ct, cl + cw, cb);
+            glassPanel(c, panelRect, 44 * k, w, h);
+            // The dots: where you are.
+            int n = stepTitle.length;
+            float dx = 30 * k, d0 = mid - (n - 1) * dx / 2;
+            for (int i = 0; i < n; i++) {
+                fill.setColor(i == step ? 0xFFFFFFFF : 0x66FFFFFF);
+                if (i == step) {
+                    r.set(d0 + i * dx - 16 * k, ct + 60 * k - 6 * k, d0 + i * dx + 16 * k, ct + 60 * k + 6 * k);
+                    c.drawRoundRect(r, 6 * k, 6 * k, fill);
+                } else c.drawCircle(d0 + i * dx, ct + 60 * k, 6 * k, fill);
+            }
+            boolean sub2 = subList != null;
+            c.drawText(sub2 ? "ELEGÍ UNA OPCIÓN" : "PASO " + (step + 1) + " DE " + n, mid, ct + 122 * k, wStep);
+            c.drawText(sub2 ? subTitle : stepTitle[step], mid, ct + 190 * k, wTitle);
+            String[] lines = (sub2 ? "" : stepSub[step]).split("\n");
+            for (int i = 0; i < lines.length; i++) c.drawText(lines[i], mid, ct + 240 * k + i * 36 * k, wSub);
+            // The rows (scrolled so the focused one shows).
+            List<Tile> l = rows();
+            float top = ct + ROWS_AT * k, bottom = cb - 140 * k, x0 = cl + CARD_PAD * k, x1 = cl + cw - CARD_PAD * k;
+            if (step == 0 && !sub2) top = ct + 340 * k;
+            float y = top, scroll = 0;
+            for (int i = 0; i < l.size(); i++) {
+                float hh = 84 * k;
+                if (!onButtons && i == focus && y + hh > bottom) scroll = y + hh - bottom;
+                y += hh + 12 * k;
+            }
+            c.save();
+            c.clipRect(x0 - 14 * k, top - 10 * k, x1 + 14 * k, bottom + 8 * k);
+            y = top - scroll;
+            for (int i = 0; i < l.size(); i++) {
+                Tile t = l.get(i);
+                t.rect.set(x0, y, x1, y + 84 * k);
+                drawRow(c, t, !onButtons && focus == i);
+                y += 96 * k;
+            }
+            c.restore();
+            // The buttons: ← Atrás and Siguiente → (the first step only goes on, the last one starts).
+            if (!sub2) {
+                float bh = 72 * k, by = cb - 60 * k - bh, gap = 24 * k, bw = (x1 - x0 - gap) / 2;
+                String next = step == 0 ? "Empezar  →" : step == n - 1 ? "Empezar a usar la tele" : "Siguiente  →";
+                if (step == 0) {
+                    r.set(x0 + bw / 2 + gap / 2, by, x1 - bw / 2 - gap / 2, by + bh);
+                    drawButton(c, next, onButtons && btn == 1);
+                } else {
+                    r.set(x0, by, x0 + bw, by + bh);
+                    drawButton(c, "←  Atrás", onButtons && btn == 0);
+                    r.set(x1 - bw, by, x1, by + bh);
+                    drawButton(c, next, onButtons && btn == 1);
+                }
+            }
+            c.drawText(CREDIT, w / 2, h - 52 * k, wCredit);
+        }
+
+        private void drawButton(Canvas c, String label, boolean on) {
+            float rad = r.height() / 2;
+            box(c, r, rad, on);
+            wBtn.setColor(on ? 0xFF1C1C1E : 0xFFFFFFFF);
+            c.drawText(label, r.centerX(), r.centerY() + Ui.halfCap(wBtn), wBtn);
         }
 
         /** A switch with no colour: white with a dark knob when on, glass with a white knob when off. */

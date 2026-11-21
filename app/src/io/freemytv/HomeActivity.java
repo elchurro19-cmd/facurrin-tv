@@ -62,7 +62,20 @@ public class HomeActivity extends Activity {
             return;
         }
         if (home != null) home.resume();
+        if (!Prefs.welcomed() && !welcomeAsked && home != null) {   // first time: the welcome, once per start
+            welcomeAsked = true;
+            home.postDelayed(() -> {
+                try {
+                    startActivity(new Intent(this, QuickSettingsActivity.class).putExtra("welcome", true));
+                    overridePendingTransition(0, 0);
+                } catch (RuntimeException e) {
+                    AppLog.w("welcome: " + e.getMessage());
+                }
+            }, 700);
+        }
     }
+
+    private static boolean welcomeAsked;
 
     @Override protected void onPause() {
         if (home != null) home.pause();

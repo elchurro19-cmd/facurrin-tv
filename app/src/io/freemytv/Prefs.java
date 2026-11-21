@@ -331,6 +331,10 @@ final class Prefs {
 
     /** The home screen's soft click when moving and opening. */
     static boolean sounds() { return sp().getBoolean("sounds", true); }
+
+    /** The welcome (first setup) was gone through. */
+    static boolean welcomed() { return sp().getBoolean("welcomed", false); }
+    static void setWelcomed(boolean on) { put("welcomed", on); }
     static void setSounds(boolean on) { put("sounds", on); }
 
     // MARK: - Widgets and football
