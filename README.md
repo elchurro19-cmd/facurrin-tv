@@ -7,6 +7,10 @@ Un inicio limpio, rápido y sin publicidad para televisores con Android TV o Goo
 reloj grande, clima, los partidos de tus equipos, reproductor de música, fotos del día de Bing de fondo y un
 protector de pantalla con tu música. Probado en una Noblex con Android 11.
 
+<p align="center"><img src="media/facurrin-tv.gif" width="720" alt="Facurrin TV en una tele: el inicio con el reloj y la barra de apps, Mis fondos, el reproductor de Spotify, el centro de control y el protector con la música"></p>
+
+<p align="center"><a href="media/facurrin-tv.mp4"><b>▶ Ver el video completo</b></a></p>
+
 ### Instalarlo
 
 **Antes, en la tele (una sola vez):** Ajustes → Preferencias del dispositivo → Información → tocá 7 veces
@@ -51,6 +55,19 @@ Si te gusta Facurrin TV, podés ayudarme a seguir mejorándolo:
 - **Desde Argentina:** transferencia al alias **facurrin** (Brubank), el monto que quieras.
 
 En la tele también está: centro de control → *Info* → *Apoyá a Facurrin* (con un QR para el celular).
+
+## Capturas
+
+| | |
+|---|---|
+| ![El inicio: reloj grande, clima y la barra de apps sobre una foto del día](media/inicio.jpg) | ![Pasando por Netflix: arriba aparece lo que estabas viendo](media/barra-tarjetas.jpg) |
+| **El inicio** | **Lo que seguís viendo, en cada app** |
+| ![El reproductor compacto con la carátula y los controles](media/reproductor.jpg) | ![El reproductor abierto en forma de L](media/reproductor-abierto.jpg) |
+| **Música** | **El reproductor abierto** |
+| ![Mis fondos: las fotos guardadas para elegir](media/mis-fondos.jpg) | ![La tarjeta de tu equipo con el próximo partido](media/equipo.jpg) |
+| **Mis fondos** | **Tu equipo** |
+| ![El centro de control con Wi-Fi, Bluetooth, brillo y el protector](media/centro-de-control.jpg) | ![El protector con la canción que suena](media/protector-musica.jpg) |
+| **Centro de control** | **Protector con tu música** |
 
 ## Volver al inicio original
 
