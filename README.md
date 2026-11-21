@@ -25,6 +25,15 @@ protector de pantalla con tu música. Probado en una Noblex con Android 11.
 
 Para volver al inicio original de la tele: *Facurrin TV* → *Pantalla de inicio* → *Original*.
 
+### Apoyá el proyecto
+
+Si te gusta Facurrin TV, podés ayudarme a seguir mejorándolo:
+
+- **PayPal:** [paypal.me/facurrin](https://paypal.me/facurrin)
+- **Desde Argentina:** transferencia al alias **facurrin** (Brubank), el monto que quieras.
+
+En la tele también está: centro de control → *Info* → *Apoyá a Facurrin* (con un QR para el celular).
+
 Sin clave de TMDB funciona todo menos las recomendaciones de películas y series. Si querés compilarlo vos con tu
 clave, mirá [Make it yours](#make-it-yours) y `CLAUDE.md`.
 

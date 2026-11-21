@@ -459,6 +459,15 @@ public class QuickSettingsActivity extends Activity {
             ver.value = () -> vName;
             ver.stay = () -> { };
             info.add(ver);
+            Tile give = new Tile("Apoyá a Facurrin", "sparkles", null);
+            give.sub = "PayPal o transferencia, para seguir mejorándola";
+            give.opens = true;
+            give.stay = () -> {
+                List<Tile> one = new ArrayList<>();
+                one.add(donateTile);
+                openSub("Apoyá a Facurrin", one);
+            };
+            info.add(give);
             Tile again = new Tile("Ver la bienvenida otra vez", "home", null);
             again.sub = "Ciudad, equipo y fondo, paso a paso";
             again.stay = this::startWelcome;
@@ -1115,6 +1124,10 @@ public class QuickSettingsActivity extends Activity {
             float cx = x0 + 186 * k, cr = x0 + pw - 34 * k;
             if (sectNames.isEmpty()) return;
             c.drawText(subList != null ? subTitle : sectNames.get(sect), cx + 6 * k, 100 * k, colTitle);
+            if (subList != null && !subList.isEmpty() && subList.get(0) == donateTile) {
+                drawDonate(c, cx, cr);
+                return;
+            }
             List<Tile> l = rows();
             float top = 136 * k, bottom = h - 34 * k, y = top, scroll = 0;
             for (int i = 0; i < l.size(); i++) {
@@ -1133,6 +1146,55 @@ public class QuickSettingsActivity extends Activity {
                 y += hh + 12 * k;
             }
             c.restore();
+        }
+
+        /** "Apoyá a Facurrin": a few words, PayPal's QR (scanned with the phone) and the alias for a transfer. */
+        private final Tile donateTile = new Tile("", "sparkles", null);
+        {
+            donateTile.stay = () -> { };
+        }
+        private Bitmap donateQr;
+        private boolean donateQrRead;
+        private TextPaint donateText, donateBig;
+        private final Paint qrPaint = new Paint();   // no filtering: the modules stay sharp squares
+
+        private void drawDonate(Canvas c, float cx, float cr) {
+            if (!donateQrRead) {
+                donateQrRead = true;
+                try (java.io.InputStream in = getContext().getAssets().open("donate/paypal.png")) {
+                    donateQr = android.graphics.BitmapFactory.decodeStream(in);
+                } catch (Exception e) {
+                    AppLog.w("donate qr: " + e.getMessage());
+                }
+                donateText = new TextPaint(Ui.text(Ui.regular, 23 * k, 0xD9FFFFFF));
+                donateBig = new TextPaint(Ui.text(Ui.semibold, 28 * k, 0xFFFFFFFF));
+            }
+            float x = cx + 6 * k, y = 160 * k;
+            c.drawText("Si te gusta, podés ayudarme a seguir", x, y, donateText);
+            c.drawText("mejorándola (y a pagar las herramientas).", x, y + 34 * k, donateText);
+            // PayPal's QR on a white square, big enough to scan from the couch.
+            float s = 300 * k, qx = cx + (cr - cx - s) / 2, qy = y + 72 * k;
+            r.set(qx - 22 * k, qy - 22 * k, qx + s + 22 * k, qy + s + 22 * k);
+            fill.setShader(null);
+            fill.setColor(0xFFFFFFFF);
+            c.drawRoundRect(r, 24 * k, 24 * k, fill);
+            if (donateQr != null) {
+                r.set(qx, qy, qx + s, qy + s);
+                c.drawBitmap(donateQr, null, r, qrPaint);
+            }
+            float ty = qy + s + 70 * k;
+            donateBig.setTextAlign(Paint.Align.CENTER);
+            donateText.setTextAlign(Paint.Align.CENTER);
+            float mid = (cx + cr) / 2;
+            c.drawText("PayPal · paypal.me/facurrin", mid, ty, donateBig);
+            c.drawText("Escaneá el código con el celular", mid, ty + 36 * k, donateText);
+            // From Argentina: a transfer to the alias, any amount, no fees.
+            r.set(cx, ty + 72 * k, cr, ty + 72 * k + 112 * k);
+            box(c, r, 22 * k, false);
+            c.drawText("Desde Argentina, transferí a", mid, r.top + 44 * k, donateText);
+            c.drawText("Alias: facurrin  (Brubank)", mid, r.top + 86 * k, donateBig);
+            donateBig.setTextAlign(Paint.Align.LEFT);
+            donateText.setTextAlign(Paint.Align.LEFT);
         }
 
         /** One row at its `rect`: glass (white when focused), its symbol, title and line, and its value or switch. */
