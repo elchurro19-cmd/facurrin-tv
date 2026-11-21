@@ -103,7 +103,7 @@ public class QuickSettingsActivity extends Activity {
     }
 
     /** Who made it: shown at the foot of the welcome and in Info. */
-    static final String CREDIT = "Hecho por Facurrin · sobre Free My TV (código abierto)";
+    static final String CREDIT = "Hecho por Facurrin";
 
     private static final class Tile {
         final String title, symbol;
@@ -429,13 +429,13 @@ public class QuickSettingsActivity extends Activity {
             final Tile mode = new Tile("Pantalla de inicio", "home", null);
             final long[] armed = {0};
             final boolean freeNow = HomeMode.FREE.equals(HomeMode.state(c).optString("mode"));   // read once, not every frame
-            mode.value = () -> freeNow ? "Free My TV" : "Original";
+            mode.value = () -> freeNow ? "Facurrin TV" : "Original";
             mode.stay = () -> {   // a big change: OK twice (the first only asks)
                 boolean free = HomeMode.FREE.equals(HomeMode.state(c).optString("mode"));
                 long now = android.os.SystemClock.uptimeMillis();
                 if (now - armed[0] > 4000) {
                     armed[0] = now;
-                    mode.sub = "OK otra vez para pasar a " + (free ? "Original" : "Free My TV");
+                    mode.sub = "OK otra vez para pasar a " + (free ? "Original" : "Facurrin TV");
                 } else {
                     armed[0] = 0;
                     HomeMode.request(c, free ? HomeMode.ORIGINAL : HomeMode.FREE);
@@ -445,8 +445,8 @@ public class QuickSettingsActivity extends Activity {
             };
             more.add(mode);
             List<Tile> info = section("Info", "sparkles");
-            Tile made = new Tile("Free My TV Glass", "sparkles", null);
-            made.sub = CREDIT;
+            Tile made = new Tile(Ui.NAME, "sparkles", null);
+            made.sub = "Hecho por Facurrin · basado en Free My TV (código abierto)";
             made.stay = () -> { };
             info.add(made);
             Tile ver = new Tile("Versión", "settings", null);
@@ -1180,7 +1180,7 @@ public class QuickSettingsActivity extends Activity {
         private static final float CARD_W = 900, CARD_TOP = 120, CARD_H = 820, CARD_PAD = 60, ROWS_AT = 300;
         private final String[] stepTitle = {"Hola, bienvenido", "¿Dónde estás?", "Tu equipo", "El fondo", "¡Listo!"};
         private final String[] stepSub = {
-                "Free My TV Glass: un inicio limpio y rápido para tu tele.\nConfigurémoslo en un minuto; cada paso se puede saltear.",
+                "Facurrin TV: un inicio limpio y rápido para tu tele.\nConfigurémoslo en un minuto; cada paso se puede saltear.",
                 "Para el clima y la hora a la que el inicio se pone oscuro.",
                 "Sus partidos y resultados en el inicio y en el protector.",
                 "Fotos del día detrás del inicio y en el protector de pantalla.",

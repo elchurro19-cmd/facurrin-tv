@@ -183,7 +183,7 @@ public class SettingsActivity extends Activity {
             scene.setMotion(0.5f, 0.2f);
             scene.applyPalette();
             setFocusable(true);
-            setContentDescription("Free My TV");
+            setContentDescription("Facurrin TV");
             // TalkBack: one item per row, id = row + 1.
             spoken = new Spoken(this, new Spoken.Source() {
                 @Override public void items(List<Integer> out) { for (int i = 1; i <= rowCount(); i++) out.add(i); }
@@ -213,7 +213,7 @@ public class SettingsActivity extends Activity {
                     if (row == 0) {
                         String busyText = busyText();
                         String value = busy() ? (busyText.isEmpty() ? Ui.tr("Starting…") : busyText)
-                                : freeActive() ? "Free My TV" : Ui.tr("Original");
+                                : freeActive() ? "Facurrin TV" : Ui.tr("Original");
                         return Ui.trf("Home Screen, {mode}", "mode", value);
                     }
                     String[] names = {Ui.tr("Screensaver, preview"), Ui.tr("Home Settings"), "Fondos",
@@ -221,7 +221,7 @@ public class SettingsActivity extends Activity {
                     return row - 1 < names.length ? names[row - 1] : "";
                 }
                 case HOME_CHOICE: {
-                    String name = row == 0 ? "Free My TV, " + Ui.tr("no ads, with the new screensaver")
+                    String name = row == 0 ? "Facurrin TV, " + Ui.tr("no ads, with the new screensaver")
                             : "Original, " + Ui.tr("the TV's factory home screen");
                     boolean inUse = (row == 0) == freeActive();
                     return name + (inUse ? Ui.tr(". In use") : "") + ", " + Ui.trf("{i} of {n}", "i", row + 1, "n", 2);
@@ -371,7 +371,7 @@ public class SettingsActivity extends Activity {
             // On the left: big symbol, title, description.
             float cx = 350 * k;
             Symbols.draw(getContext(), c, "sparkles", cx, 400 * k, 130 * k, 0xEBFFFFFF);
-            c.drawText("Free My TV Glass", cx, 600 * k, title);
+            c.drawText(Ui.NAME, cx, 600 * k, title);
             c.drawText("Tu inicio de vidrio, a tu manera", cx, 648 * k, subtitle);
             c.drawText(versionName(getContext()), cx, 692 * k, version);
             // The panel: glass, its left column a shade darker.
@@ -432,7 +432,7 @@ public class SettingsActivity extends Activity {
                 int ink = blend(0xF2FFFFFF, INK, f);
                 Symbols.draw(getContext(), c, SECT_ICONS[i], rowRect.left + 44 * k, rowRect.centerY(), 30 * k, ink);
                 sectName.setColor(ink);
-                String sub = i == 0 ? (working ? (busyText().isEmpty() ? Ui.tr("Starting…") : busyText()) : freeActive() ? "Free My TV" : Ui.tr("Original"))
+                String sub = i == 0 ? (working ? (busyText().isEmpty() ? Ui.tr("Starting…") : busyText()) : freeActive() ? "Facurrin TV" : Ui.tr("Original"))
                         : i == 1 ? Ui.tr("Preview") : "";
                 if (sub.isEmpty()) {
                     c.drawText(names[i], rowRect.left + 84 * k, rowRect.centerY() + Ui.halfCap(sectName), sectName);
@@ -458,7 +458,7 @@ public class SettingsActivity extends Activity {
             if (at == 2 || at == 3 || at == 5) {   // the rows themselves, quiet (not focused)
                 drawRows(c, at == 2 ? HOME_SETTINGS : at == 3 ? BACKGROUNDS : REMOTE_KEYS, true);
             } else {
-                String[] about = {"Free My TV o la pantalla de inicio original de la tele.", "OK muestra el protector de pantalla ahora.", "",
+                String[] about = {"Facurrin TV o la pantalla de inicio original de la tele.", "OK muestra el protector de pantalla ahora.", "",
                         "", "Qué apps van en la barra y en qué orden.", "", "Abre los ajustes de Android TV: imagen, sonido, red."};
                 c.drawText(about[at], LIST_X * k + 30 * k, (LIST_TOP + 40) * k, previewText);
                 c.drawText("OK o → para entrar", LIST_X * k + 30 * k, (LIST_TOP + 84) * k, rowSub);
@@ -492,7 +492,7 @@ public class SettingsActivity extends Activity {
         private void drawMainOld(Canvas c, float seconds) {
             boolean working = busy();
             String busyText = busyText();
-            String mode = freeActive() ? "Free My TV" : Ui.tr("Original");
+            String mode = freeActive() ? "Facurrin TV" : Ui.tr("Original");
             String[] labels = {Ui.tr("Home Screen"), Ui.tr("Screensaver"),
                     Ui.tr("Home Settings"), "Fondos", Ui.tr("Shelf"),
                     Ui.tr("Remote Buttons"), Ui.tr("TV Settings")};
@@ -569,7 +569,7 @@ public class SettingsActivity extends Activity {
         private void drawChoice(Canvas c) {
             Paint heading = Ui.text(Ui.displaySemibold, 34 * k, 0xFFFFFFFF);
             c.drawText(Ui.tr("Home Screen"), LIST_X * k + 30 * k, (LIST_TOP - 24) * k, heading);
-            String[][] options = {{"Free My TV", Ui.tr("No ads, with the new screensaver")},
+            String[][] options = {{"Facurrin TV", Ui.tr("No ads, with the new screensaver")},
                     {Ui.tr("Original"), Ui.tr("The TV's factory home screen")}};
             int current = freeActive() ? 0 : 1;
             for (int i = 0; i < 2; i++) {

@@ -593,8 +593,8 @@ final class Dlna {
                 + "<root xmlns=\"urn:schemas-upnp-org:device-1-0\" xmlns:dlna=\"urn:schemas-dlna-org:device-1-0\">"
                 + "<specVersion><major>1</major><minor>0</minor></specVersion><device>"
                 + "<deviceType>" + RENDERER + "</deviceType><friendlyName>" + esc(name) + "</friendlyName>"
-                + "<manufacturer>Free My TV</manufacturer><modelName>Free My TV</modelName>"
-                + "<modelDescription>Free My TV media renderer</modelDescription><modelNumber>1</modelNumber>"
+                + "<manufacturer>Facurrin</manufacturer><modelName>Facurrin TV</modelName>"
+                + "<modelDescription>Facurrin TV media renderer</modelDescription><modelNumber>1</modelNumber>"
                 + "<UDN>uuid:" + uuid + "</UDN><dlna:X_DLNADOC>DMR-1.50</dlna:X_DLNADOC><serviceList>"
                 + service(AVT, "AVTransport", "avt") + service(RCS, "RenderingControl", "rcs")
                 + service(CMS, "ConnectionManager", "cms") + "</serviceList></device></root>";

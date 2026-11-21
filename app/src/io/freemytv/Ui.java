@@ -139,7 +139,15 @@ final class Ui {
     };
 
     /** The text for this English key in the current language (the English itself when there is none). */
+    /** The launcher's name on screen (the code and the catalogues still say Free My TV, its origin). */
+    static final String NAME = "Facurrin TV";
+
     static String tr(String english) {
+        String s = trRaw(english);
+        return s.indexOf("Free My TV") < 0 ? s : s.replace("Free My TV", NAME);
+    }
+
+    private static String trRaw(String english) {
         String s = catalogue.get(english);
         if (s != null) return s;
         if (english.indexOf('|') < 0) return english;
