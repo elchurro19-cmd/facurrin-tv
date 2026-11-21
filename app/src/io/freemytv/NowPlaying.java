@@ -41,7 +41,9 @@ final class NowPlaying implements MediaSessionManager.OnActiveSessionsChangedLis
     private Bitmap raw;   // the cover as the app sent it (art and artLarge are copies)
     private long songAt;
     private final Runnable reread = this::read;
-    private int[] startSig;
+    private int[] startSig;   // the first picture of this song
+    private long startSigAt;
+    private boolean startReplaced;
     /** Pictures learnt to be the app's logo (sent in place of a cover between songs); kept in a file. */
     private static final java.util.List<int[]> logos = new java.util.ArrayList<>();
     private static boolean logosRead;
@@ -86,7 +88,7 @@ final class NowPlaying implements MediaSessionManager.OnActiveSessionsChangedLis
             out.append('\n');
         }
         try {
-            java.nio.file.Files.write(new java.io.File(context.getFilesDir(), "cover-logos.txt").toPath(), out.toString().getBytes("UTF-8"));
+            java.nio.file.Files.write(new java.io.File(context.getFilesDir(), "cover-logos2.txt").toPath(), out.toString().getBytes("UTF-8"));
         } catch (Exception ignored) {
         }
     }
@@ -95,7 +97,9 @@ final class NowPlaying implements MediaSessionManager.OnActiveSessionsChangedLis
         if (logosRead) return;
         logosRead = true;
         try {
-            java.io.File f = new java.io.File(context.getFilesDir(), "cover-logos.txt");
+            java.io.File old = new java.io.File(context.getFilesDir(), "cover-logos.txt");
+            if (old.exists()) old.delete();   // learnt by the old rule, which took repeated album covers for logos
+            java.io.File f = new java.io.File(context.getFilesDir(), "cover-logos2.txt");
             if (!f.exists()) return;
             for (String line : new String(java.nio.file.Files.readAllBytes(f.toPath()), "UTF-8").split("\n")) {
                 String[] parts = line.split(",");
@@ -121,7 +125,8 @@ final class NowPlaying implements MediaSessionManager.OnActiveSessionsChangedLis
     boolean shuffleOn;
     int repeatMode;   // 0 off, 1 one, 2 all (as MediaSessionCompat)
     /** Bumped on every change: the screen re-measures its text only then. */
-    int version;
+    int version;   // moves when the song or its cover changes (not on play, pause or position)
+    int artVersion;   // moves only when the cover changes
 
     NowPlaying(Context c, Listener l) {
         context = c;
@@ -330,25 +335,33 @@ final class NowPlaying implements MediaSessionManager.OnActiveSessionsChangedLis
                     MediaMetadata.METADATA_KEY_ALBUM_ARTIST, MediaMetadata.METADATA_KEY_ALBUM);
             b = m.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
             if (b == null) b = m.getBitmap(MediaMetadata.METADATA_KEY_ART);
-            if (b != null && (!t.equals(title) || !a.equals(artist))) {
-                // A new song: the same picture at the start of two different songs is the app's logo, not a cover.
-                int[] sg = signature(b);
-                if (startSig != null && similar(sg, startSig)) rememberLogo(sg);
-                startSig = sg;
+            boolean newSong = !t.equals(title) || !a.equals(artist);
+            long now = SystemClock.elapsedRealtime();
+            if (newSong) {
+                songAt = now;
+                startSig = null;
+                startReplaced = false;
             }
-            if (b != null && art != null && isLogo(b)) b = null;   // the logo: as if no cover came yet
+            if (b != null && b != raw && (startSig == null || (!startReplaced && now - startSigAt < 8000))) {
+                // The first picture of a song replaced by another within seconds: that first one was the app's logo.
+                int[] sg = signature(b);
+                if (startSig == null) {
+                    startSig = sg;
+                    startSigAt = now;
+                } else if (!startReplaced && now - startSigAt < 8000 && !similar(sg, startSig)) {
+                    startReplaced = true;
+                    rememberLogo(startSig);
+                }
+            }
+            if (b != null && isLogo(b)) b = null;   // the logo: as if no cover came yet
             if (b == null) {
-                // No cover yet: the app's logo (its display icon) is what Spotify sends first on a new song. The last
-                // cover stays a few seconds while the new one comes; only then the logo.
-                Bitmap icon = m.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON);
-                boolean newSong = !t.equals(title) || !a.equals(artist);
-                long now = SystemClock.elapsedRealtime();
-                if (newSong) songAt = now;
-                if (art != null && now - songAt < 4000) {
+                // No cover yet (Spotify sends its logo first on a new song): the last cover stays while the new one
+                // comes, up to 15 s; never the logo while there's a cover to show.
+                if (raw != null && now - songAt < 15000) {
                     b = raw;
                     main.removeCallbacks(reread);
-                    main.postDelayed(reread, 4100 - (now - songAt));
-                } else b = icon;
+                    main.postDelayed(reread, 15100 - (now - songAt));
+                } else if (raw == null) b = m.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON);
             }
             d = m.getLong(MediaMetadata.METADATA_KEY_DURATION);
         }
@@ -371,16 +384,21 @@ final class NowPlaying implements MediaSessionManager.OnActiveSessionsChangedLis
         speed = s == null ? 0 : (s.getPlaybackSpeed() == 0 ? 1 : s.getPlaybackSpeed());
         duration = d;
         pkg = c == null ? "" : c.getPackageName();
-        if (!t.equals(title) || !a.equals(artist) || b != raw) {   // (was compared to the copy: made again on every read)
+        boolean coverChanged = b != raw && !sameCover(b, raw);
+        if (!t.equals(title) || !a.equals(artist) || coverChanged) {
             title = t;
             artist = a;
-            raw = b;
-            art = b == null ? null : square(b, 160);
-            // Glass edition: the open player shows the cover big, so it keeps a sharper copy too (up to 512 px).
-            artLarge = b == null ? null : square(b, Math.min(512, Math.min(b.getWidth(), b.getHeight())));
+            if (coverChanged) {
+                art = b == null ? null : square(b, 160);
+                // Glass edition: the open player shows the cover big, so it keeps a sharper copy too (up to 512 px).
+                artLarge = b == null ? null : square(b, Math.min(512, Math.min(b.getWidth(), b.getHeight())));
+                artVersion++;
+            }
+            version++;
         }
+        if (b != null) raw = b;
+        else if (coverChanged) raw = null;
         if (!playing && !dismissed && !title.isEmpty()) dismissed = stopped().equals(pkg + "\n" + title);
-        version++;
         listener.onNowPlaying();
     }
 
@@ -407,6 +425,17 @@ final class NowPlaying implements MediaSessionManager.OnActiveSessionsChangedLis
             if (v != null && v.length() > 0) return v.toString();
         }
         return "";
+    }
+
+    /** The same picture sent again: every read parcels a new copy of it. */
+    private static boolean sameCover(Bitmap x, Bitmap y) {
+        if (x == null || y == null) return x == y;
+        if (x.getWidth() != y.getWidth() || x.getHeight() != y.getHeight()) return false;
+        try {
+            return x.sameAs(y);
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     /** The cover, center-cropped to a square of `size` px: drawn at that size, it stays sharp and cheap. */

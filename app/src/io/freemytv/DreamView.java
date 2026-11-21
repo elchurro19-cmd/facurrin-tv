@@ -844,7 +844,9 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
     private static final int MC_SHUFFLE = 0, MC_PREV = 1, MC_PLAY = 2, MC_NEXT = 3, MC_REPEAT = 4, MC_MOON = 5;
     private int musicFocus = MC_PLAY, musicVersion = -1;
     private float musicShow;
-    private Bitmap musicBlur;
+    private Bitmap musicBlur, musicBlurOld, coverNow, coverOld;
+    private long musicSwapAt;   // a new cover fades in over the old one (the blur made off the UI thread)
+    private static final long SWAP_MS = 700;
     private int musicAccent = 0xFFFFFFFF;
     private android.text.TextPaint mTitle, mArtist, mLabel, mTime;
     private final Paint mFill = new Paint(Paint.ANTI_ALIAS_FLAG), mBlur = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
@@ -948,6 +950,36 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
     private long darkKeyAt;
     private static final long CTRL_SHOW_MS = 5000, CTRL_FADE_MS = 600;   // the controls stay 5 s after a key
 
+    /** A cover in the rounded square at (l, t), `s` wide. */
+    private void drawCover(Canvas c, Bitmap art, float l, float t, float s, float alpha) {
+        android.graphics.BitmapShader sh = shaderFor(art);
+        mMatrix.setScale(s / art.getWidth(), s / art.getHeight());
+        mMatrix.postTranslate(l, t);
+        sh.setLocalMatrix(mMatrix);
+        mFill.setShader(sh);
+        mFill.setAlpha(Math.round(255 * alpha));
+        c.drawRoundRect(mRect, 22 * k, 22 * k, mFill);
+        mFill.setShader(null);
+    }
+
+    private Bitmap shOfA, shOfB;   // two shaders kept: the cover and, while it fades in, the one before
+    private android.graphics.BitmapShader shA, shB;
+
+    private android.graphics.BitmapShader shaderFor(Bitmap b) {
+        if (b == shOfA) return shA;
+        if (b == shOfB) return shB;
+        android.graphics.BitmapShader sh = new android.graphics.BitmapShader(b,
+                android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP);
+        if (shOfA != coverNow && shOfA != coverOld) {
+            shOfA = b;
+            shA = sh;
+        } else {
+            shOfB = b;
+            shB = sh;
+        }
+        return sh;
+    }
+
     private void drawMusicScreen(Canvas c) {
         boolean on = musicOn();
         if (on && musicShow <= 0.01f) darkKeyAt = SystemClock.uptimeMillis();
@@ -957,11 +989,31 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
         NowPlaying np = nowPlaying;
         if (np == null) return;
         float a = musicShow;
-        if (np.version != musicVersion) {
-            musicVersion = np.version;
-            Bitmap big = np.artLarge != null ? np.artLarge : np.art;
-            musicBlur = HomeView.blurOf(big);
-            musicAccent = HomeView.coverColor(np.art);
+        if (np.artVersion != musicVersion) {
+            final int want = musicVersion = np.artVersion;
+            final Bitmap big = np.artLarge != null ? np.artLarge : np.art, small = np.art;
+            new Thread(() -> {
+                final Bitmap bl = HomeView.blurOf(big);
+                final int acc = HomeView.coverColor(small);
+                post(() -> {
+                    if (want != musicVersion) return;   // another cover came meanwhile
+                    boolean first = coverNow == null && musicBlur == null;
+                    musicBlurOld = musicBlur;
+                    coverOld = coverNow;
+                    musicBlur = bl;
+                    coverNow = big;
+                    musicAccent = acc;
+                    musicSwapAt = first ? 0 : SystemClock.uptimeMillis();
+                    invalidate();
+                });
+            }, "cover-blur").start();
+        }
+        float swap = Ui.clamp((SystemClock.uptimeMillis() - musicSwapAt) / (float) SWAP_MS);
+        swap = swap * swap * (3 - 2 * swap);
+        if (swap < 1) postInvalidateOnAnimation();
+        else {
+            musicBlurOld = null;
+            coverOld = null;
         }
         if (mTitle == null) {
             mTitle = new android.text.TextPaint(Ui.text(Ui.displaySemibold, 64 * k, 0xFFFFFFFF));
@@ -978,7 +1030,7 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
             for (Paint p : new Paint[] {mClock, mDate}) p.setShadowLayer(24 * k, 0, 6 * k, 0x73000000);
             mRing.setStyle(Paint.Style.STROKE);
         }
-        Bitmap art = np.artLarge != null ? np.artLarge : np.art;
+        Bitmap art = coverNow;   // the cover shown follows its blur, so both change together
         boolean dk = darkNow;   // dark (O3): black, the clock in outline, the cover as it is, the rest dimmed
         if (false) {   // the old M3
             mFill.setShader(null);
@@ -1016,10 +1068,16 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
         mFill.setShader(null);
         mFill.setColor(Ui.alpha(dk ? 0xFF000000 : 0xFF101012, a));
         c.drawRect(0, 0, w, h, mFill);
-        if (musicBlur != null && !dk) {
-            mBlur.setAlpha(Math.round(255 * a));
+        if ((musicBlur != null || musicBlurOld != null) && !dk) {
             mRect.set(0, 0, w, h);
-            c.drawBitmap(musicBlur, null, mRect, mBlur);
+            if (musicBlurOld != null && swap < 1) {
+                mBlur.setAlpha(Math.round(255 * a));
+                c.drawBitmap(musicBlurOld, null, mRect, mBlur);
+            }
+            if (musicBlur != null) {
+                mBlur.setAlpha(Math.round(255 * a * (musicBlurOld != null ? swap : 1)));
+                c.drawBitmap(musicBlur, null, mRect, mBlur);
+            }
             mFill.setColor(Ui.alpha(0xFF000000, 0.4f * a));
             c.drawRect(0, 0, w, h, mFill);
         }
@@ -1045,15 +1103,8 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
         c.drawRoundRect(mRect, 22 * k, 22 * k, mFill);
         mRect.set(cl, ct, cl + cs, ct + cs);
         if (art != null) {
-            android.graphics.BitmapShader sh = new android.graphics.BitmapShader(art,
-                    android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP);
-            mMatrix.setScale(cs / art.getWidth(), cs / art.getHeight());
-            mMatrix.postTranslate(cl, ct);
-            sh.setLocalMatrix(mMatrix);
-            mFill.setShader(sh);
-            mFill.setAlpha(Math.round(255 * a));
-            c.drawRoundRect(mRect, 22 * k, 22 * k, mFill);
-            mFill.setShader(null);
+            if (coverOld != null && swap < 1) drawCover(c, coverOld, cl, ct, cs, a);
+            drawCover(c, art, cl, ct, cs, a * (coverOld != null ? swap : 1));
             mRing.setStrokeWidth(2 * k);   // a faint rim: a dark cover still reads against the dark
             mRing.setColor(Ui.alpha(0x40FFFFFF, a));
             c.drawRoundRect(mRect, 22 * k, 22 * k, mRing);

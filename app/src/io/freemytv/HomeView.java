@@ -6759,8 +6759,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 handler.removeCallbacks(npWarm);
                 handler.postDelayed(npWarm, 1200);
             }
-            if (cur.version != npArtReady) {   // each new cover goes up to the GPU ahead, not when the player opens
-                npArtReady = cur.version;
+            if (cur.artVersion != npArtReady) {   // each new cover goes up to the GPU ahead, not when the player opens
+                npArtReady = cur.artVersion;
                 Bitmap a = cur.artLarge != null ? cur.artLarge : cur.art;
                 if (a != null) a.prepareToDraw();
             }
