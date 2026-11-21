@@ -611,6 +611,14 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     /** One layer of the screen. It draws in full-screen coordinates: the glass needs each pixel's real position. */
     private SceneView sceneSkyView, sceneLandView;
+    /** The "↑ Más de…" pill over the focused app, on its own (small to redraw, nothing else with it). */
+    private View hintView;
+    /** The capsule's three bars, on their own: they bounce without the capsule (glass and text) drawn again. */
+    private View eqView;
+    private float eqX, eqBottom, eqW2;
+    private int eqColor;
+    private boolean eqShown;
+    private final RectF eqClip = new RectF();
 
     /** The scene's two pictures, each drawn once: the sky (moved by its translation) and the mountains with the scrims. */
     private final class SceneView extends View {
@@ -736,6 +744,30 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         sceneLandView = new SceneView(a, false);
         sceneSkyView.setVisibility(GONE);
         sceneLandView.setVisibility(GONE);
+        eqView = new View(a) {
+            private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final RectF b = new RectF();
+
+            @Override protected void onDraw(Canvas c) {
+                NowPlaying np = nowPlaying;
+                if (!eqShown || np == null || !np.visible() || picksOn()) return;
+                float bw = 4 * k, gap = (eqW2 - 3 * bw) / 2, t = SystemClock.uptimeMillis() / 1000f;
+                p.setColor(eqColor);
+                c.save();
+                c.clipRect(eqClip);
+                for (int i = 0; i < 3; i++) {
+                    float bh = !np.playing ? bw : (8 + 11 * Math.abs((float) Math.sin(t * EQ_SPEED[i] + EQ_PHASE[i]))) * k;
+                    b.set(eqX + i * (bw + gap), eqBottom - bh, eqX + i * (bw + gap) + bw, eqBottom);
+                    c.drawRoundRect(b, bw / 2, bw / 2, p);
+                }
+                c.restore();
+            }
+        };
+        hintView = new View(a) {
+            @Override protected void onDraw(Canvas c) {
+                if (labelPaint != null && !picksOn()) drawShelfHint(c);
+            }
+        };
         heroLayer = new Layer(a, HERO);
         status = new Layer(a, STATUS);
         platter = new Layer(a, PLATTER);
@@ -760,7 +792,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         dimLayer.setVisibility(GONE);
         veilLayer = new View(a);
         veilLayer.setVisibility(GONE);
-        for (View v : new View[] {sky, sceneSkyView, sceneLandView, veilLayer, heroLayer, watchLayer, status, platter, tiles, drawerLayer, sheetLayer, toastLayer, dimLayer}) {
+        for (View v : new View[] {sky, sceneSkyView, sceneLandView, veilLayer, heroLayer, hintView, watchLayer, status, eqView, platter, tiles, drawerLayer, sheetLayer, toastLayer, dimLayer}) {
             v.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);   // TalkBack reads the items (Spoken)
             addView(v);
         }
@@ -1395,6 +1427,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         Bitmap ss = sceneSky;   // the sky is wider than the screen: it slides
         sceneSkyView.layout(0, 0, ss == null ? width : Math.round(ss.getWidth() * height / (float) ss.getHeight()), height);
         sceneLandView.layout(0, 0, width, height);
+        hintView.layout(0, 0, width, height);
+        eqView.layout(0, 0, width, height);
         veilLayer.layout(0, 0, width, height);
         place(heroLayer, 0, 0);
         watchLayer.layout(0, 0, width, height);
@@ -1546,7 +1580,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             tilesMoving = true;
         }
         boolean hintMoving = step(hintShow, dt), artMoving = step(artShow, dt);
-        if (hintMoving) heroLayer.invalidate();
+        if (hintMoving && hintView != null) hintView.invalidate();
         if (artMoving) {
             sky.invalidate();
             heroLayer.invalidate();
@@ -1622,7 +1656,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         float shift = SHIFT * k;
         float lift = -d * shift;
         show(heroLayer, top, lift);
+        if (hintView != null) show(hintView, top, lift);
         show(status, top, lift);
+        if (eqView != null) show(eqView, top, lift);   // the bars go with the capsule
         show(platter, home * (1 - smoothstep(0, 0.45f, dc)), lift);   // the glass fades instead of being redrawn
         show(tiles, home, lift);
         float da = home * smoothstep(0.1f, 0.6f, dc);
@@ -3823,7 +3859,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         heroChanged |= aim(watchActive, inBubble ? 0 : -1, snap);
         heroChanged |= aim(bubbleShow, inBubble ? 0 : -1, snap);
         if (zone != Z_SHELF && zone != Z_WATCH) artShow[0].target = 0;   // the content background is the shelf's
-        if (zone == Z_SHELF) heroChanged = true;   // the hint follows the focused app
+        if (zone == Z_SHELF && hintView != null) hintView.invalidate();   // the hint follows the focused app
         followWatch();
         statusChanged |= aim(playerFocus, !sheetOpen && zone == Z_PLAYER ? 0 : -1, snap);
         statusChanged |= aim(avatarFocus, !sheetOpen && zone == Z_AVATAR ? 0 : -1, snap);
@@ -5392,7 +5428,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 drawWxPanel(c);
                 c.restore();
             }
-            drawShelfHint(c);
+            // (the "↑ Más de…" hint has its own view now: moving along the bar doesn't redraw the big clock)
             if (npWarmPending) {   // once, unseen: everything the player makes on its first open is made now
                 npWarmPending = false;
                 npWarmed = true;
@@ -6675,7 +6711,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             if (!running) return;
             boolean eq = nowPlaying != null && nowPlaying.playing && nowPlaying.visible();
             if (nowPlaying != null) {
-                statusDirty = true;
+                if (eqView != null && eqShown) eqView.invalidate();   // only the bars: the capsule stays as drawn
+                else statusDirty = true;
                 // The open player: its wave travels with the equalizer while it plays; paused, only the progress
                 // moves, once a second.
                 long now = SystemClock.uptimeMillis();
@@ -6685,7 +6722,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 }
                 wake();
             }
-            if (eq) handler.postDelayed(this, idleMode() ? 1000 : EQ_FRAME);   // idle: the bars barely move
+            if (eq) handler.postDelayed(this, EQ_FRAME);   // the bars always move smoothly
         }
     };
 
@@ -6714,6 +6751,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     };
 
     private void onNowPlaying() {
+        statusDirty = true;   // the title, the cover, play or pause: the capsule is drawn again once
+        wake();
         NowPlaying cur = nowPlaying;
         if (cur != null && cur.visible()) {
             if (!npWarmed) {
@@ -7105,7 +7144,17 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         float base1 = r.centerY() - block / 2 + t1, base2 = base1 + lineGap + t2;
         c.drawText(npTitleText, 0, npTitleText.length(), tx, base1, npTitle);
         c.drawText(npArtistText, 0, npArtistText.length(), tx, base2, npArtist);
-        if (eqW > 0) {
+        if (eqW > 0) {   // where the bars go: their own view draws them (so they move without redrawing the capsule)
+            eqColor = Ui.alpha(blend(tone(L_INK, 0xE6FFFFFF), L_INK, pf), te);
+            eqX = r.right - rad * 0.75f - eqW + status.getLeft();
+            eqBottom = r.centerY() + 9 * k + status.getTop();
+            eqW2 = eqW;
+            eqClip.set(r);
+            eqClip.offset(status.getLeft(), status.getTop());
+            eqShown = true;
+            if (eqView != null) eqView.invalidate();
+        }
+        if (eqW > 0 && eqView == null) {
             fill.setShader(null);
             fill.setColor(Ui.alpha(blend(tone(L_INK, 0xE6FFFFFF), L_INK, pf), te));
             float bw = 4 * k, gap = (eqW - 3 * bw) / 2, x = r.right - rad * 0.75f - eqW, bottom = r.centerY() + 9 * k;
@@ -7598,6 +7647,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     }
 
     private void drawLightButtons(Canvas c) {
+        eqShown = false;   // set again below if the capsule shows its bars
         refreshTopState();
         drawAvatar(c);
         drawNowPlaying(c);
