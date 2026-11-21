@@ -1153,36 +1153,51 @@ public class QuickSettingsActivity extends Activity {
         {
             donateTile.stay = () -> { };
         }
-        private Bitmap donateQr;
+        private Bitmap donateQr, qrSized;
         private boolean donateQrRead;
         private TextPaint donateText, donateBig;
         private final Paint qrPaint = new Paint();   // no filtering: the modules stay sharp squares
 
-        private void drawDonate(Canvas c, float cx, float cr) {
-            if (!donateQrRead) {
-                donateQrRead = true;
-                try (java.io.InputStream in = getContext().getAssets().open("donate/paypal.png")) {
-                    donateQr = android.graphics.BitmapFactory.decodeStream(in);
-                } catch (Exception e) {
-                    AppLog.w("donate qr: " + e.getMessage());
-                }
-                donateText = new TextPaint(Ui.text(Ui.regular, 23 * k, 0xD9FFFFFF));
-                donateBig = new TextPaint(Ui.text(Ui.semibold, 28 * k, 0xFFFFFFFF));
+        private void readDonate() {
+            if (donateQrRead) return;
+            donateQrRead = true;
+            try (java.io.InputStream in = getContext().getAssets().open("donate/paypal.png")) {
+                android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+                o.inScaled = false;
+                o.inPreferredConfig = Bitmap.Config.ARGB_8888;
+                donateQr = android.graphics.BitmapFactory.decodeStream(in, null, o);
+            } catch (Exception e) {
+                AppLog.w("donate qr: " + e.getMessage());
             }
+            donateText = new TextPaint(Ui.text(Ui.regular, 23 * k, 0xD9FFFFFF));
+            donateBig = new TextPaint(Ui.text(Ui.semibold, 28 * k, 0xFFFFFFFF));
+        }
+
+        /**
+         * PayPal's QR about `size` px wide, centred on (cx, top): a white square with four modules of margin (what phones
+         * need to find it), each module a whole number of pixels, drawn unscaled at a whole pixel. Returns its bottom.
+         */
+        private float drawQr(Canvas c, float cx, float top, float size) {
+            if (donateQr == null) return top;
+            int n = donateQr.getWidth(), m = Math.max(2, (int) (size / (n + 8)));
+            if (qrSized == null || qrSized.getWidth() != n * m) qrSized = Bitmap.createScaledBitmap(donateQr, n * m, n * m, false);
+            float side = (n + 8) * m;
+            float l = Math.round(cx - side / 2), t = Math.round(top);
+            r.set(l, t, l + side, t + side);
+            fill.setShader(null);
+            fill.setColor(0xFFFFFFFF);
+            c.drawRoundRect(r, 3 * m, 3 * m, fill);
+            c.drawBitmap(qrSized, l + 4 * m, t + 4 * m, qrPaint);
+            return t + side;
+        }
+
+        private void drawDonate(Canvas c, float cx, float cr) {
+            readDonate();
             float x = cx + 6 * k, y = 160 * k;
             c.drawText("Si te gusta, podés ayudarme a seguir", x, y, donateText);
             c.drawText("mejorándola (y a pagar las herramientas).", x, y + 34 * k, donateText);
-            // PayPal's QR on a white square, big enough to scan from the couch.
-            float s = 300 * k, qx = cx + (cr - cx - s) / 2, qy = y + 72 * k;
-            r.set(qx - 22 * k, qy - 22 * k, qx + s + 22 * k, qy + s + 22 * k);
-            fill.setShader(null);
-            fill.setColor(0xFFFFFFFF);
-            c.drawRoundRect(r, 24 * k, 24 * k, fill);
-            if (donateQr != null) {
-                r.set(qx, qy, qx + s, qy + s);
-                c.drawBitmap(donateQr, null, r, qrPaint);
-            }
-            float ty = qy + s + 70 * k;
+            // PayPal's QR, big enough to scan from the couch.
+            float ty = drawQr(c, (cx + cr) / 2, y + 60 * k, 360 * k) + 56 * k;
             donateBig.setTextAlign(Paint.Align.CENTER);
             donateText.setTextAlign(Paint.Align.CENTER);
             float mid = (cx + cr) / 2;
@@ -1246,7 +1261,7 @@ public class QuickSettingsActivity extends Activity {
                 "Para el clima y la hora a la que el inicio se pone oscuro.",
                 "Sus partidos y resultados en el inicio y en el protector.",
                 "Fotos del día detrás del inicio y en el protector de pantalla.",
-                "Ya podés usar tu tele.\nTodo esto se cambia después en el centro de control."};
+                "Ya podés usar tu tele. Todo se cambia en el centro de control."};
         private TextPaint wTitle, wSub, wStep, wBtn, wCredit;
         private LinearGradient welcomeBg;
 
@@ -1420,6 +1435,20 @@ public class QuickSettingsActivity extends Activity {
                 y += 96 * k;
             }
             c.restore();
+            if (step == n - 1 && !sub2) {   // the last step: who made it, and how to help (PayPal's QR, the alias)
+                readDonate();
+                float qs = 250 * k, qcx = x0 + 30 * k + qs / 2, qtop = ct + 330 * k;
+                float qb = drawQr(c, qcx, qtop, qs);
+                float tx = qcx + qs / 2 + 50 * k;
+                donateBig.setTextAlign(Paint.Align.LEFT);
+                donateText.setTextAlign(Paint.Align.LEFT);
+                float ty = qtop + 40 * k;
+                c.drawText("¿Te gustó? Apoyá a Facurrin", tx, ty, donateBig);
+                c.drawText("Escaneá el código para PayPal", tx, ty + 46 * k, donateText);
+                c.drawText("(paypal.me/facurrin)", tx, ty + 80 * k, donateText);
+                c.drawText("o desde Argentina transferí al", tx, ty + 136 * k, donateText);
+                c.drawText("alias facurrin (Brubank)", tx, ty + 176 * k, donateBig);
+            }
             // The buttons: ← Atrás and Siguiente → (the first step only goes on, the last one starts).
             if (!sub2) {
                 float bh = 72 * k, by = cb - 60 * k - bh, gap = 24 * k, bw = (x1 - x0 - gap) / 2;
