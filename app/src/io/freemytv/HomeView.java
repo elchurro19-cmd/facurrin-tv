@@ -1229,15 +1229,18 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     private static int[] wallpaperFrost(Bitmap src) {
         try {
-            // Down in two steps (each one filtered) to a tiny picture, then up: a wide, smooth blur for almost nothing.
-            Bitmap mid = Bitmap.createScaledBitmap(src, 240, 135, true);
-            Bitmap tiny = Bitmap.createScaledBitmap(mid, 40, 22, true);
-            Bitmap up = Bitmap.createScaledBitmap(tiny, Backdrop.FW, Backdrop.FH, true);
-            int[] px = new int[Backdrop.FW * Backdrop.FH];
-            up.getPixels(px, 0, Backdrop.FW, 0, 0, Backdrop.FW, Backdrop.FH);
+            // Down in two filtered steps to the frost's size, then three box-blur passes (close to a Gaussian): smooth
+            // when stretched over the screen. (A 40×22 picture blown up showed its blocks.)
+            Bitmap mid = Bitmap.createScaledBitmap(src, Backdrop.FW * 2, Backdrop.FH * 2, true);
+            Bitmap small = Bitmap.createScaledBitmap(mid, Backdrop.FW, Backdrop.FH, true);
+            int[] px = new int[Backdrop.FW * Backdrop.FH], tmp = new int[px.length];
+            small.getPixels(px, 0, Backdrop.FW, 0, 0, Backdrop.FW, Backdrop.FH);
             mid.recycle();
-            tiny.recycle();
-            up.recycle();
+            small.recycle();
+            for (int pass = 0; pass < 3; pass++) {
+                boxBlur(px, tmp, Backdrop.FW, Backdrop.FH, 5, true);
+                boxBlur(tmp, px, Backdrop.FW, Backdrop.FH, 5, false);
+            }
             return px;
         } catch (RuntimeException | OutOfMemoryError e) {
             return null;

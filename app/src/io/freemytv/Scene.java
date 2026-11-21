@@ -286,7 +286,7 @@ final class Scene {
     private static final float[] FROST_STOPS = {0, 0.42f, 0.85f, 1};
     private LinearGradient frostSmoke;
     private final RectF frostRim = new RectF();
-    private final Paint frostImagePaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private final Paint frostImagePaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
     private final android.graphics.Matrix frostMatrix = new android.graphics.Matrix();
     private BitmapShader frostImageShader;
     private Bitmap frostShaderOf;
